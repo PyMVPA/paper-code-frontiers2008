@@ -1,6 +1,12 @@
 Current directory contains the code snippets for the data analysis for
 this paper.
 
+Conventions:
+
+You might have synced the data from belka to your local box somewhere
+else than frontiers/data, thus please create a symlink. Code snippets
+should assume that data is under frontiers/data.
+
 Description of the files:
 
  N/A
