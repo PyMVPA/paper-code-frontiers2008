@@ -34,8 +34,10 @@ def loadData():
 
     verbose(1, "Loading EEG data from basepath %s" % datapath)
     for k, v in id2label.iteritems():
-        t = EEPDataset(datapath + v + '.bin', labels=k)
-        verbose(2, "Loaded data '%s' with labels '%i'" % (v, k))
+        filename = datapath + v + '.bin'
+        verbose(2, "Loading data '%s' with labels '%i'" % (v, k))
+
+        t = EEPDataset(filename, labels=k)
 
         # XXX equalize number of samples (TODO)
         # YYY why do we actually want to equalize at this level?
@@ -70,7 +72,7 @@ def plotERP():
         #    computed at different samples rate, rereferenced?
         for i, cond_prefix in enumerate(cond_prefixes):
             l1, l2 = cond_prefix + 'o', cond_prefix + 'n'
-            ds_1 = ds.selectSamples(ds.idsbylabels([label2id[l1]]))
+            ds_1 = ds.selectSamples(ds.idssbylabels([label2id[l1]]))
             ds_2 = ds.selectSamples(ds.idsbylabels([label2id[l2]]))
 
             ax = fig.add_subplot(2, 2, i+1, frame_on=False)
@@ -92,7 +94,7 @@ def plotERP():
     #fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, wspace=0.5, hspace=0.65)
     P.show()
 
-def clfEEG_dummy():
+def clfEEG_dummy(ds):
     #
     # Simple classification. Silly one for now
     #
@@ -113,8 +115,7 @@ def clfEEG_dummy():
                     (l1, l2, tstats['ACC'], tstats['MCC'][0],
                      stats['ACC'], stats['MCC'][0]))
 
-
-if __name__ == '__main__':
+def main():
     # TODO we need to make EEPBin available from the EEPDataset
     # DONE some basic assignment of attributes to dsattr
 
@@ -127,11 +128,33 @@ if __name__ == '__main__':
     nchannels, spt = ds.mapper.mask.shape      # number of channels, samples per trial
     post = spt * 1.0/ SR - pre # compute seconds in trials after onset
     ch_map = dict(zip(ds._dsattr['eb_channels'], xrange(nchannels))) # map from channel name to index
-
     ch_of_interest = ch_map['Pz']
-    #ch_mask = N.zeros(ds.mapper.mask.shape, dtype='b')
 
     cond_prefixes = ( 'sm', 'sf', 'dm', 'df' )
 
+    # Re-reference the data relative to avg reference... not sure if
+    # that would give any result
+    do_avgref = True
+    if do_avgref:
+        ebdata_orig = ebdata
+        ebdata = ds.mapper.reverse(ds.samples)
+        avg = N.mean(ebdata[:,:-3,:], axis=1)
+        ebdata_ = ebdata.swapaxes(1,2)
+        ebdata_[:,:,:-3] -= avg[:,:,N.newaxis]
+        ebdata = ebdata_.swapaxes(1,2)
+        ds.samples = ds.mapper.forward(ebdata)
+
+    do_wavelets = False
+    if do_wavelets:
+        ebdata = ds.mapper.reverse(ds.samples)
+        WT = WaveletTransformationMapper(dim=2)
+        ds_orig = ds
+        ebdata_wt = WT(ebdata)
+        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
+
     #plotERP()
-    clfEEG_dummy()
+    clfEEG_dummy(ds)
+
+
+if __name__ == '__main__':
+    main()
