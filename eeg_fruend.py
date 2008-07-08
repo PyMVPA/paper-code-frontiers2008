@@ -53,7 +53,7 @@ def loadData():
 #
 # Just a simple example of ERP plotting
 #
-def plotERP():
+def plot_ERP(ds):
     # Nice to see the truth behind the bars ;-)
     for errtype in ['std', 'ste']:
         fig = P.figure(facecolor='white', figsize=(8,8))
@@ -77,7 +77,7 @@ def plotERP():
 
             ax = fig.add_subplot(2, 2, i+1, frame_on=False)
 
-            fig = plot_erps(
+            fig = plotERPs(
                 ({'label': l1,
                   'data': ds.mapper.reverse(ds_1.samples)[:, ch_of_interest, :],
                   'color': 'r'},
@@ -136,8 +136,8 @@ def main():
     # that would give any result
     do_avgref = True
     if do_avgref:
-        ebdata_orig = ebdata
         ebdata = ds.mapper.reverse(ds.samples)
+        ebdata_orig = ebdata
         avg = N.mean(ebdata[:,:-3,:], axis=1)
         ebdata_ = ebdata.swapaxes(1,2)
         ebdata_[:,:,:-3] -= avg[:,:,N.newaxis]
@@ -152,7 +152,7 @@ def main():
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
 
-    #plotERP()
+    #plot_ERP(ds)
     clfEEG_dummy(ds)
 
 
