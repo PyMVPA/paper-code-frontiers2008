@@ -7,6 +7,9 @@ You might have synced the data from belka to your local box somewhere
 else than frontiers/data, thus please create a symlink. Code snippets
 should assume that data is under frontiers/data.
 
+Update: Please use the config handler to get value of MVPA_PATHS_DATA_ROOT
+instead of hardcoded paths!
+
 Description of the files:
 
  N/A

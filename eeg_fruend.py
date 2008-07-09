@@ -12,20 +12,20 @@
 __docformat__ = 'restructuredtext'
 
 from mvpa.suite import *
-#from mvpa.base import verbose
-#from mvpa.datasets.eep import EEPDataset
-##from mvpa.misc.eepbin import EEPBin
-#from mvpa.misc.plot.erp import *
-
+import os.path
 
 verbose.level = 4
 
-datapath = '../data/eeg.fruend/ga14/'
+datapath = os.path.join(cfg.get('paths', 'data root', default='../data'),
+                        'eeg.fruend/ga14/')
+verbose(1, 'Datapath is %s' % datapath)
 
 # Code our poor labels
 label2id = {'dfn': 1, 'dfo': 2, 'dmn': 3, 'dmo': 4,
              'sfn': 5, 'sfo': 6, 'smn': 7, 'smo': 8}
 id2label = dict( [(x[1], x[0]) for x in label2id.iteritems()])
+cond_prefixes = ( 'sm', 'sf', 'dm', 'df' )
+
 
 # TODO big -- make pymvpa working with string labels
 
@@ -54,6 +54,17 @@ def loadData():
 # Just a simple example of ERP plotting
 #
 def plot_ERP(ds):
+    # sampling rate
+    SR = ds.samplingrate
+    # data is already trials, this would correspond sec before onset
+    pre = -ds.t0
+    # number of channels, samples per trial
+    nchannels, spt = ds.mapper.mask.shape
+    post = spt * 1.0/ SR - pre # compute seconds in trials after onset
+    # map from channel name to index
+    ch_map = dict(zip(ds.channelids, xrange(nchannels)))
+    ch_of_interest = ch_map['Pz']
+
     # Nice to see the truth behind the bars ;-)
     for errtype in ['std', 'ste']:
         fig = P.figure(facecolor='white', figsize=(8,8))
@@ -72,7 +83,7 @@ def plot_ERP(ds):
         #    computed at different samples rate, rereferenced?
         for i, cond_prefix in enumerate(cond_prefixes):
             l1, l2 = cond_prefix + 'o', cond_prefix + 'n'
-            ds_1 = ds.selectSamples(ds.idssbylabels([label2id[l1]]))
+            ds_1 = ds.selectSamples(ds.idsbylabels([label2id[l1]]))
             ds_2 = ds.selectSamples(ds.idsbylabels([label2id[l2]]))
 
             ax = fig.add_subplot(2, 2, i+1, frame_on=False)
@@ -99,7 +110,7 @@ def clfEEG_dummy(ds):
     # Simple classification. Silly one for now
     #
     verbose(1, "Sweeping through classifiers with odd/even splitter for generalization")
-    for clf in clfs['binary']:
+    for clf in clfs['binary', '!lars', 'has_sensitivity', 'does_feature_selection']: # lars is too slow
         cv = CrossValidatedTransferError(
             TransferError(clf),
             OddEvenSplitter(),
@@ -123,15 +134,6 @@ def main():
     # places I guess
     ds = loadData()
 
-    SR = 1.0/ds._dsattr['eb_dt']        # sampling rate
-    pre = -ds._dsattr['eb_t0']          # data is already trials, this would correspond sec before onset
-    nchannels, spt = ds.mapper.mask.shape      # number of channels, samples per trial
-    post = spt * 1.0/ SR - pre # compute seconds in trials after onset
-    ch_map = dict(zip(ds._dsattr['eb_channels'], xrange(nchannels))) # map from channel name to index
-    ch_of_interest = ch_map['Pz']
-
-    cond_prefixes = ( 'sm', 'sf', 'dm', 'df' )
-
     # Re-reference the data relative to avg reference... not sure if
     # that would give any result
     do_avgref = True
@@ -144,7 +146,7 @@ def main():
         ebdata = ebdata_.swapaxes(1,2)
         ds.samples = ds.mapper.forward(ebdata)
 
-    do_wavelets = False
+    do_wavelets = True
     if do_wavelets:
         ebdata = ds.mapper.reverse(ds.samples)
         WT = WaveletTransformationMapper(dim=2)
@@ -152,7 +154,13 @@ def main():
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
 
+
     #plot_ERP(ds)
+
+    do_zscore = True
+    if do_zscore:
+        zscore(ds, perchunk=False)
+
     clfEEG_dummy(ds)
 
 
