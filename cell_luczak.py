@@ -31,6 +31,7 @@ def loadData():
     samples =  cell_mat['tc_spk']
     labels = cell_mat['tc_stim']
     d = MaskedDataset(samples=samples, labels=labels)
+    coarsenChunks(d, nchunks=4)         # lets split into 4 chunks
     return d
 
 
@@ -38,19 +39,33 @@ def clf_dummy(ds):
     #
     # Simple classification. Silly one for now
     #
-    verbose(1, "Sweeping through classifiers with odd/even splitter for generalization")
-    for clf in clfs['multiclass', '!lars']: # lars is too slow
+    verbose(1, "Sweeping through classifiers with NFold splitter for generalization")
+
+    dsc = removeInvariantFeatures(ds)
+    verbose(2, "Removed invariant features. Got %d out of %d features" % (dsc.nfeatures, ds.nfeatures))
+
+    for clf_ in clfs['gpr'] + clfs['smlr']:#'multiclass', '!lars']: # lars is too slow
+      for clf in [FeatureSelectionClassifier(
+                     clf_,
+                     SensitivityBasedFeatureSelection(
+                       OneWayAnova(),
+                       FractionTailSelector(0.01, mode='select', tail='upper')),
+                     descr="%s on 1%%(ANOVA)" % clf_.descr),
+#                  clf_
+                  ]:
         cv = CrossValidatedTransferError(
             TransferError(clf),
-            OddEvenSplitter(),
+            NFoldSplitter(),
             enable_states=['confusion', 'training_confusion'])
         verbose(2, "Classifier " + clf.descr, lf=False)
-        error = cv(ds)
+        error = cv(dsc)
         tstats = cv.training_confusion.stats
         stats = cv.confusion.stats
         verbose(3, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
                 (tstats['ACC'], N.mean(tstats['MCC']),
                  stats['ACC'], N.mean(stats['MCC'])))
+        if verbose.level > 3:
+            print str(cv.confusion)
 
 def main():
     # TODO we need to make EEPBin available from the EEPDataset
@@ -62,15 +77,16 @@ def main():
 
     do_wavelets = False                 # although it might come handy
     if do_wavelets:
+        verbose(2, "Converting into wavelets")
         ebdata = ds.mapper.reverse(ds.samples)
-        WT = WaveletTransformationMapper(dim=2)
+        WT = WaveletTransformationMapper(dim=2, wavelet='db1')
         ds_orig = ds
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
 
-
     do_zscore = False
     if do_zscore:
+        verbose(2, "Z-scoring full dataset")
         zscore(ds, perchunk=False)
 
     clf_dummy(ds)
