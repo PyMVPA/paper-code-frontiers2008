@@ -44,12 +44,12 @@ def clf_dummy(ds):
             TransferError(clf),
             OddEvenSplitter(),
             enable_states=['confusion', 'training_confusion'])
-        verbose(2, "Classifier " + clf.descr)
+        verbose(2, "Classifier " + clf.descr, lf=False)
         error = cv(ds)
         tstats = cv.training_confusion.stats
         stats = cv.confusion.stats
-        verbose(3, "%s vs %s: Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (l1, l2, tstats['ACC'], N.mean(tstats['MCC']),
+        verbose(3, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
+                (tstats['ACC'], N.mean(tstats['MCC']),
                  stats['ACC'], N.mean(stats['MCC'])))
 
 def main():
