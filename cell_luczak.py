@@ -44,13 +44,13 @@ def clf_dummy(ds):
     dsc = removeInvariantFeatures(ds)
     verbose(2, "Removed invariant features. Got %d out of %d features" % (dsc.nfeatures, ds.nfeatures))
 
-    for clf_ in clfs['gpr'] + clfs['smlr']:#'multiclass', '!lars']: # lars is too slow
+    for clf_ in clfs['sg', 'svm', 'multiclass'] + clfs['gpr', 'multiclass'] + clfs['smlr', 'multiclass']:
       for clf in [FeatureSelectionClassifier(
                      clf_,
                      SensitivityBasedFeatureSelection(
                        OneWayAnova(),
-                       FractionTailSelector(0.01, mode='select', tail='upper')),
-                     descr="%s on 1%%(ANOVA)" % clf_.descr),
+                       FractionTailSelector(0.10, mode='select', tail='upper')),
+                     descr="%s on 10%%(ANOVA)" % clf_.descr),
 #                  clf_
                   ]:
         cv = CrossValidatedTransferError(
