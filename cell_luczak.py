@@ -16,11 +16,23 @@ from scipy.io import loadmat
 
 import os.path
 
-parser.option_groups = [optsCommon]
-optVerbose.default=2                    # for now
-parser.add_options([optWaveletFamily, optZScore])
-(options, files) = parser.parse_args()
+if not locals().has_key('__IP'):
+    opt.do_lfp = \
+                 Option("--lfp",
+                        action="store_true", dest="do_lfp",
+                        default=False,
+                        help="Either to process LFP instead of spike counts")
 
+    opt.verbose.default=2                    # for now
+    parser.add_options([opt.zscore, opt.do_lfp])
+    parser.option_groups = [opts.common, opts.wavelet]
+    (options, files) = parser.parse_args()
+else:
+    class O(object): pass
+    options = O()
+    options.wavelet_family = 'db2'
+    options.zscore = True
+    options.do_lfp = True
 verbose.level = 4
 
 datapath = os.path.join(cfg.get('paths', 'data root', default='../data'),
@@ -56,7 +68,8 @@ def clf_dummy(ds):
 
     dsc = removeInvariantFeatures(ds)
     verbose(2, "Removed invariant features. Got %d out of %d features" % (dsc.nfeatures, ds.nfeatures))
-
+    best_ACC = 0
+    best_MCC = -1
     for clf_ in clfs['smlr', 'multiclass']:
       #clfs['sg', 'svm', 'multiclass'] + clfs['gpr', 'multiclass'] + clfs['smlr', 'multiclass']:
       for clf in [ FeatureSelectionClassifier(
@@ -71,7 +84,7 @@ def clf_dummy(ds):
                        OneWayAnova(),
                        FractionTailSelector(0.10, mode='select', tail='upper')),
                      descr="%s on 10%%(ANOVA)" % clf_.descr),
-                  clf_
+                   clf_
                   ]:
         cv = CrossValidatedTransferError(
             TransferError(clf),
@@ -81,11 +94,17 @@ def clf_dummy(ds):
         error = cv(dsc)
         tstats = cv.training_confusion.stats
         stats = cv.confusion.stats
+        mMCC = N.mean(stats['MCC'])
+        if stats['ACC'] > best_ACC:
+            best_ACC = stats['ACC']
+        if mMCC > best_MCC:
+            best_MCC = mMCC
         verbose(3, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
                 (tstats['ACC'], N.mean(tstats['MCC']),
-                 stats['ACC'], N.mean(stats['MCC'])))
+                 stats['ACC'], mMCC))
         if verbose.level > 3:
             print str(cv.confusion)
+    verbose(1, "Best results were ACC=%.2g MCC=%.2g" % (best_ACC, best_MCC))
 
 def main():
     # TODO we need to make EEPBin available from the EEPDataset
@@ -95,14 +114,16 @@ def main():
     # places I guess
     ds, ds_lfp = loadData()
 
-    # lets work on LFPs
-    ds = ds_lfp
+    if options.do_lfp:
+        verbose(1, "Working on LFP data instead of spike counts")
+        # lets work on LFPs
+        ds = ds_lfp
 
     if options.wavelet_family is not None:
         verbose(2, "Converting into wavelets family %s."
                 % options.wavelet_family)
         ebdata = ds.mapper.reverse(ds.samples)
-        WT = WaveletTransformationMapper(dim=2, wavelet=options.wavelet_family)
+        WT = WaveletTransformationMapper(dim=1, wavelet=options.wavelet_family)
         ds_orig = ds
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
