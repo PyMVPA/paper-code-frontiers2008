@@ -30,9 +30,10 @@ if not locals().has_key('__IP'):
 else:
     class O(object): pass
     options = O()
-    options.wavelet_family = 'db2'
-    options.zscore = True
-    options.do_lfp = True
+    options.wavelet_family = None#'db2'
+    options.wavelet_decomposition = 'dwt'
+    options.zscore = False
+    options.do_lfp = False
 verbose.level = 4
 
 datapath = os.path.join(cfg.get('paths', 'data root', default='../data'),
@@ -82,9 +83,15 @@ def clf_dummy(ds):
                      clf_,
                      SensitivityBasedFeatureSelection(
                        OneWayAnova(),
-                       FractionTailSelector(0.10, mode='select', tail='upper')),
-                     descr="%s on 10%%(ANOVA)" % clf_.descr),
-                   clf_
+                       FractionTailSelector(0.05, mode='select', tail='upper')),
+                     descr="%s on 5%%(ANOVA)" % clf_.descr),
+                   #FeatureSelectionClassifier(
+                   #  clf_,
+                   #  SensitivityBasedFeatureSelection(
+                   #    OneWayAnova(),
+                   #    FractionTailSelector(0.10, mode='select', tail='upper')),
+                   #  descr="%s on 10%%(ANOVA)" % clf_.descr),
+                   #clf_
                   ]:
         cv = CrossValidatedTransferError(
             TransferError(clf),
@@ -123,14 +130,20 @@ def main():
         verbose(2, "Converting into wavelets family %s."
                 % options.wavelet_family)
         ebdata = ds.mapper.reverse(ds.samples)
-        WT = WaveletTransformationMapper(dim=1, wavelet=options.wavelet_family)
+        kwargs = {'dim': 1, 'wavelet': options.wavelet_family}
+        if options.wavelet_decomposition == 'dwt':
+            verbose(3, "Doing DWT")
+            WT = WaveletTransformationMapper(**kwargs)
+        else:
+            verbose(3, "Doing DWP")
+            WT = WaveletPacketMapper(**kwargs)
         ds_orig = ds
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
 
     if options.zscore:
         verbose(2, "Z-scoring full dataset")
-        zscore(ds, perchunk=False)
+        zscore(ds, perchunk=True)
 
     clf_dummy(ds)
 
