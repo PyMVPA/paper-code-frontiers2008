@@ -18,6 +18,9 @@ target_samplingrate = 120
 def loadData(subj):
     datasets = []
 
+    # use to generate unique chunks for all samples
+    chunk_counter = 0
+
     for cond_id, cond in conditions.iteritems():
         # for now just with tiny dataset
         meg = TuebingenMEG(os.path.join(dataroot,
@@ -40,7 +43,12 @@ def loadData(subj):
         data = resample(data, 120 * toi, axis=2)
 
         # no chunks specified, ie. each sample will be in its own chunks
-        datasets.append(MaskedDataset(samples=data, labels=cond_id))
+        datasets.append(MaskedDataset(
+                            samples=data, labels=cond_id,
+                            chunks=range(chunk_counter,
+                                         chunk_counter + data.shape[0])))
+
+        chunk_counter += data.shape[0]
 
     # merge all datasets
     dataset = datasets[0]
