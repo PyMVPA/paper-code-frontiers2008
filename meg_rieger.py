@@ -13,7 +13,8 @@ conditions = {1: 'cosu', 2: 'fausu'}
 # time window of interest (in seconds; starting with epoch)
 toi = 0.8
 # sampling rate after preprocessing in Hz
-target_samplingrate = 120
+target_samplingrate = 80
+
 
 def loadData(subj):
     datasets = []
@@ -31,16 +32,21 @@ def loadData(subj):
         # just select MEG channels
         data = meg.data[:, [i for i, v in enumerate(meg.channelids)
                                             if v.startswith('M')]]
+        print 'Selected %i channels' % data.shape[1]
 
         # extract time window of interest (starting at first sample)
         nsamples_toi = int(meg.samplingrate * toi)
+        print 'Only using first %i timepoints, corresponding to %.2f s' \
+                % (nsamples_toi, nsamples_toi / meg.samplingrate)
+
         # keep sample, keep channels, select TOI
         data = data[:, :, :nsamples_toi]
 
-        # XXX: missing 40 Hz low-pass filtering!!
-
-        # resample timeseries of each sample and each channel
-        data = resample(data, 120 * toi, axis=2)
+        # low-pass filter / resample each channels timeseries
+        # cutoff frequency = target_samplingrate/2
+        data = resample(data,
+                        nsamples_toi * target_samplingrate / meg.samplingrate,
+                        window='ham', axis=2)
 
         # no chunks specified, ie. each sample will be in its own chunks
         datasets.append(MaskedDataset(
