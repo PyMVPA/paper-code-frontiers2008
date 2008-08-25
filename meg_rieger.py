@@ -84,5 +84,10 @@ cv2B = CrossValidatedTransferError(
                       nrunspersplit=2), # increase to reasonable number
                       enable_states=['confusion', 'training_confusion'])
 
+
+# zscore -- when every sample is in its own chunk 'perchunk' is pointless
+#zscore(data, perchunk=False)
+
+
 #cv2A(data)
 #cv2B(data)
