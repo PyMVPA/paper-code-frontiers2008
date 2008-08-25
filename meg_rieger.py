@@ -32,13 +32,17 @@ def loadData(subj):
         # just select MEG channels
         data = meg.data[:, [i for i, v in enumerate(meg.channelids)
                                             if v.startswith('M')]]
-        print 'Selected %i channels' % data.shape[1]
+        verbose(1, 'Selected %i channels' % data.shape[1])
 
         # extract time window of interest (starting at first sample)
         nsamples_toi = int(meg.samplingrate * toi)
-        print 'Only using first %i timepoints, corresponding to %.2f s' \
-                % (nsamples_toi, nsamples_toi / meg.samplingrate)
+        verbose(1, 'Only using first %i timepoints, corresponding to %.2f s' \
+                % (nsamples_toi, nsamples_toi / meg.samplingrate))
 
+        ### YOH: NOT SURE... and they did select only 600ms after
+        ### onset for classification, first 200ms were used for
+        ### removing baseline
+        ##
         # keep sample, keep channels, select TOI
         data = data[:, :, :nsamples_toi]
 
