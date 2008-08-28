@@ -188,6 +188,23 @@ def finalFigure(origds, mldataset, sens, channel):
     ax = fig.add_subplot(3, 1, 1, frame_on=False)
 #    P.title(channel)
     ax.axison = False
+
+    # TODO:
+    #   resample
+    #   plot sensitivities prior onset
+    #   add sensitivities??? GPR?? I-RELIEF?
+    #   make code below nicer -- MAKE USE OF plotERPs ;-)
+
+    # Might be more consise
+    #
+    # responses = [ origds['labels':i].O[:, ch_of_interest, :]
+    #               for i in [0, 1] ]
+    # dwave =
+    # plotERPs( [{'label':'lineart', 'color':'r', 'data':responses[0]},
+    #            {'label':'picture', 'color':'b', 'data':responses[1]},
+    #            {'label':'dwave',   'color':'x', 'data':dwave, 'pre_mean':0}],
+    #            pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype)
+
     t1 = plotERP(origds.mapper.reverse(
                  origds.selectSamples(
                      origds.labels == 0).samples)[:, ch_of_interest, :],
