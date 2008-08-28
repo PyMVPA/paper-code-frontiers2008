@@ -29,9 +29,9 @@ cond_prefixes = ( 'sm', 'sf', 'dm', 'df' )
 
 
 # plotting helper function
-def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None):
-    xlocations = N.array(range(len(data))) + 0.5
-    width = 0.5
+def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
+               width=0.2, offset=0.0, color='0.6'):
+    xlocations = N.array(range(len(data))) + width + offset
 
     # work with arrays
     data = N.array(data)
@@ -41,7 +41,7 @@ def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None):
                  data.mean(axis=1),
                  yerr=data.std(axis=1) / N.sqrt(data.shape[1]),
                  width=width,
-                 color='0.6',
+                 color=color,
                  ecolor='black')
 
     if ylim:
@@ -57,7 +57,7 @@ def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None):
 
     P.xlim(0, xlocations[-1]+width*2)
 
-
+    return plot
 
 
 # TODO big -- make pymvpa working with string labels
@@ -160,6 +160,93 @@ def plot_ERP(ds, addon=None):
     #P.show()
 
 
+def finalFigure(origds, mldataset, sens, channel):
+    # sampling rate
+    SR = origds.samplingrate
+    # data is already trials, this would correspond sec before onset
+    pre = -origds.t0
+    # number of channels, samples per trial
+    nchannels, spt = origds.mapper.mask.shape
+    # compute seconds in trials after onset
+    post = spt * 1.0/ SR - pre
+
+    # index of the channel of interest
+    ch_of_interest = origds.channelids.index(channel)
+
+    # error type to use in all plots
+    errtype='ste'
+
+    fig = P.figure(facecolor='white', figsize=(8,4))
+#    fig.clf()
+    # tricks to get title above all subplots
+#    ax = fig.add_subplot(1, 1, 1, frame_on=False);
+
+    axis_props = dict(color='gray', linewidth=2, markeredgewidth=2, zorder=1)
+
+    # plot ERPs
+    ax = fig.add_subplot(3, 1, 1, frame_on=False)
+#    P.title(channel)
+    ax.axison = False
+    t1 = plotERP(origds.mapper.reverse(
+                 origds.selectSamples(
+                     origds.labels == 0).samples)[:, ch_of_interest, :],
+                 color='red',
+                 pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
+    t2 = plotERP(origds.mapper.reverse(
+                 origds.selectSamples(
+                     origds.labels == 1).samples)[:, ch_of_interest, :],
+                 color='blue',
+                 pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
+    dwave = N.array(t1 - t2, ndmin=2)
+
+    t2 = plotERP(dwave, color='black',
+                 pre=pre, post=post, SR=SR, ax=ax, errtype='none')
+
+    _make_centeredaxis(ax, 0, offset=0.3, ai=1, mult=-1.0, **axis_props)
+
+    # plot sensitivities
+    ax = fig.add_subplot(3, 1, 2, frame_on=False)
+    ax.axison = False
+
+    sens_labels = []
+    colors = ['red', 'green', 'blue', 'cyan']
+    for i, (sid, s) in enumerate(sens):
+        sens_labels.append(sid)
+        # back-project
+        backproj = mldataset.mapReverse(s)
+        # and normalize so that all non-zero weights sum up to 1
+        s_orig = L1Normed(backproj)#, norm=N.mean(backproj > 0))
+
+        soi = s_orig[:, ch_of_interest, :]
+        plotERP(-soi, pre=pre, post=post, SR=SR, ax=ax, errtype=errtype,
+                color=colors[i])
+
+    P.legend(sens_labels)
+    _make_centeredaxis(ax, 0, offset=0.3, ai=1, mult=1000.0, **axis_props)
+
+    # per-channel barplot
+    ax = fig.add_subplot(3, 1, 3, frame_on=False)
+
+    barwidth=0.2
+    ps = []
+    for i, (sid, s) in enumerate(sens):
+        # back-project
+        backproj = mldataset.mapReverse(s)
+        # and normalize so that all non-zero weights sum up to 1
+        s_orig = L1Normed(backproj)#, norm=N.mean(backproj > 0))
+
+        # compute per channel scores (yields nchannels x nchunks)
+        scores = N.sum(s_orig, axis=2).T
+        p = makeBarPlot(scores[:-3], labels=origds.channelids[:-3],
+                    width=barwidth, offset=barwidth*i, color=colors[i])
+        ps.append(p)
+
+    P.legend( [p[0] for p in ps], sens_labels, loc=2)
+
+    P.show()
+
+
+
 def clfEEG_dummy(ds):
     #
     # Simple classification. Silly one for now
@@ -189,11 +276,11 @@ def scoreChannels(ds):
     return sa()
 
 
-def runCV(ds):
+def runCV(ds, splitter):
     cv = CrossValidatedTransferError(
           TransferError(LinearCSVMC()),
 #          OddEvenSplitter(),
-          NFoldSplitter(),
+          splitter,
           harvest_attribs=\
            ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
           enable_states=['confusion', 'training_confusion'])
@@ -217,8 +304,7 @@ def labels2binlabels(ds, mode):
 
 
 if __name__ == '__main__':
-    # XXX: many things look ugly... we need cleaner interface at few
-    # places I guess
+    # load dataset for some subject
     ds=loadData('ga14')
 
     mode = 'color' # object, delayed
@@ -243,8 +329,6 @@ if __name__ == '__main__':
         ebdata = ebdata_.swapaxes(1,2)
         ds.samples = ds.mapper.forward(ebdata)
 
-#    plot_ERP(ds)
-
     verbose(1, 'A-priori feature selection')
     # a-priori feature selection
     mask = ds.mapper.getMask()
@@ -258,34 +342,61 @@ if __name__ == '__main__':
     ds = ds.selectFeatures(ds.mapForward(mask).nonzero()[0])
     print ds.summary()
 
-
-    #do_wavelets = False
-    #if do_wavelets:
-    #    verbose(1, 'Applying wavelet mapper')
-    #    ebdata = ds.mapper.reverse(ds.samples)
-    #    WT = WaveletTransformationMapper(dim=2)
-    #    ds_orig = ds
-    #    ebdata_wt = WT(ebdata)
-    #    ds = MaskedDataset(samples=ebdata_wt,
-    #                       labels=ds_orig.labels,
-    #                       chunks=ds_orig.chunks)
-
-
     do_zscore = True
     if do_zscore:
         verbose(1, 'Zscoring')
         zscore(ds, perchunk=True)
 
-    #clfEEG_dummy(ds)
-    #r = scoreChannels(ds)
-    cv = runCV(ds)
-    sensitivities = N.array(cv.harvested.values()[0])
+    # eats all sensitivities
+    senses = []
 
-    # back-project
-    s_orig = ds.mapReverse(sensitivities)
+    # splitter to use for all analyses
+    splttr = NFoldSplitter()
 
-    # get pristine dataset
+    # some classifiers to test
+    clfs = {'SMLR': SMLR(lm=0.1),
+            'lCSVM': LinearCSVMC(),
+           }
+
+    # run classifiers in cross-validation
+    for label, clf in clfs.iteritems():
+        cv = \
+          CrossValidatedTransferError(
+            TransferError(clf),
+            splttr,
+            harvest_attribs=\
+              ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
+            enable_states=['confusion', 'training_confusion'])
+
+        verbose(1, 'Doing cross-validation with ' + label)
+        # run cross-validation
+        merror = cv(ds)
+
+        # get harvested sensitivities for all splits
+        sensitivities = N.array(cv.harvested.values()[0])
+        # and store
+        senses.append((label + ' weights', sensitivities))
+
+
+    verbose(1, 'Computing additonal sensitvities')
+    # define some sensitivities
+    sensanas={'ANOVA': OneWayAnova()
+             }
+
+    # wrapper everything into SplitFeaturewiseMeasure
+    # compute additional sensitivities
+    for k, v in sensanas.iteritems():
+        verbose(2, 'Computing: ' + k)
+        sa = SplitFeaturewiseMeasure(v, splttr,
+                                     enable_states=['maps'])
+        # compute sensitivities
+        sa(ds)
+        # and grab them for all splits
+        senses.append((k, sa.maps))
+
+    # (re)get pristine dataset
     ds_pristine=loadData('ga14')
     labels2binlabels(ds_pristine, mode)
 
-    plot_ERP(ds_pristine, s_orig)
+    # and finally
+    finalFigure(ds_pristine, ds, senses, 'Pz')
