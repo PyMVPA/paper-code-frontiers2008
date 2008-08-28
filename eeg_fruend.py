@@ -22,16 +22,18 @@ datapath = os.path.join(cfg.get('paths', 'data root', default='data'),
 verbose(1, 'Datapath is %s' % datapath)
 
 # Code our poor labels
+# XXX: only need id2label
 label2id = {'dfn': 1, 'dfo': 2, 'dmn': 3, 'dmo': 4,
              'sfn': 5, 'sfo': 6, 'smn': 7, 'smo': 8}
 id2label = dict( [(x[1], x[0]) for x in label2id.iteritems()])
-cond_prefixes = ( 'sm', 'sf', 'dm', 'df' )
 
 
 # plotting helper function
 def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
-               width=0.2, offset=0.0, color='0.6'):
-    xlocations = N.array(range(len(data))) + width + offset
+               width=0.2, offset=0.2, color='0.6', distance=1.0):
+
+    # determine location of bars
+    xlocations = (N.arange(len(data)) * distance) + offset
 
     # work with arrays
     data = N.array(data)
@@ -50,12 +52,13 @@ def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
         P.title(title)
 
     if labels:
-        P.xticks(xlocations+ width/2, labels)
+        P.xticks(xlocations + width / 2, labels)
 
     if ylabel:
         P.ylabel(ylabel)
 
-    P.xlim(0, xlocations[-1]+width*2)
+    # leave some space after last bar
+    P.xlim(0, xlocations[-1] + width + offset)
 
     return plot
 
@@ -72,10 +75,6 @@ def loadData(subj):
 
         t = EEPDataset(filename, labels=k)
 
-        # XXX equalize number of samples (TODO)
-        # YYY why do we actually want to equalize at this level?
-        #t = t.selectSamples(t.chunks < 105)
-
         if d is None:
             d = t
         else:
@@ -85,6 +84,8 @@ def loadData(subj):
 
 #
 # Just a simple example of ERP plotting
+#
+# XXX: might vanish now
 #
 def plot_ERP(ds, addon=None):
     # sampling rate
@@ -247,49 +248,6 @@ def finalFigure(origds, mldataset, sens, channel):
 
 
 
-def clfEEG_dummy(ds):
-    #
-    # Simple classification. Silly one for now
-    #
-    verbose(1, "Sweeping through classifiers with odd/even splitter for generalization")
-    for clf in clfs['binary', '!lars', 'has_sensitivity', 'does_feature_selection']: # lars is too slow
-        cv = CrossValidatedTransferError(
-            TransferError(clf),
-            OddEvenSplitter(nperlabel='equal'),
-            enable_states=['confusion', 'training_confusion'])
-        verbose(2, "Classifier " + clf.descr)
-        error = cv(ds)
-        tstats = cv.training_confusion.stats
-        stats = cv.confusion.stats
-        verbose(3, "Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (tstats['ACC'], tstats['MCC'][0],
-                 stats['ACC'], stats['MCC'][0]))
-
-
-def scoreChannels(ds):
-    clf = SMLR()
-    cv=CrossValidatedTransferError(TransferError(LinearCSVMC()), OddEvenSplitter(), enable_states=['transerrors'])
-    clf.train(ds)
-
-    sa = clf.getSensitivityAnalyzer(force_training=False, transformer=L2Normed)
-
-    return sa()
-
-
-def runCV(ds, splitter):
-    cv = CrossValidatedTransferError(
-          TransferError(LinearCSVMC()),
-#          OddEvenSplitter(),
-          splitter,
-          harvest_attribs=\
-           ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
-          enable_states=['confusion', 'training_confusion'])
-    verbose(1, 'Doing cross-validation')
-    merror = cv(ds)
-
-    return cv
-
-
 def labels2binlabels(ds, mode):
     if mode == 'delayed':
         filt = [1, 2, 3, 4]
@@ -314,7 +272,9 @@ if __name__ == '__main__':
     labels2binlabels(ds, mode)
 
     # artificially group into chunks
-    coarsenChunks(ds, 6)
+    nchunks = 6
+    verbose(1, 'Group data into %i handy chunks' % nchunks)
+    coarsenChunks(ds, nchunks)
 
     # Re-reference the data relative to avg reference... not sure if
     # that would give any result
@@ -344,8 +304,9 @@ if __name__ == '__main__':
 
     do_zscore = True
     if do_zscore:
-        verbose(1, 'Zscoring')
+        verbose(1, 'Z-scoring')
         zscore(ds, perchunk=True)
+    print ds.summary()
 
     # eats all sensitivities
     senses = []
@@ -371,19 +332,27 @@ if __name__ == '__main__':
         verbose(1, 'Doing cross-validation with ' + label)
         # run cross-validation
         merror = cv(ds)
+        verbose(1, 'Accumulated confusion matrix for out-of-sample tests')
+        print cv.confusion
 
         # get harvested sensitivities for all splits
         sensitivities = N.array(cv.harvested.values()[0])
         # and store
-        senses.append((label + ' weights', sensitivities))
+        senses.append(
+            (label + ' (%i\% corr.) weights' \
+                % cv.confusion._ConfusionMatrix__stats['CORR'],
+             sensitivities))
+        # XXX: Do I really need to go through the valley of pain to get the
+        #      accuracy?
 
-
-    verbose(1, 'Computing additonal sensitvities')
+    verbose(1, 'Computing additional sensitvities')
     # define some sensitivities
     sensanas={'ANOVA': OneWayAnova()
+              # gimme more !!
              }
 
     # wrapper everything into SplitFeaturewiseMeasure
+    # to get sense of variance across our artificial splits
     # compute additional sensitivities
     for k, v in sensanas.iteritems():
         verbose(2, 'Computing: ' + k)
@@ -394,9 +363,9 @@ if __name__ == '__main__':
         # and grab them for all splits
         senses.append((k, sa.maps))
 
-    # (re)get pristine dataset
+    # (re)get pristine dataset for plotting of ERPs
     ds_pristine=loadData('ga14')
     labels2binlabels(ds_pristine, mode)
 
-    # and finally
+    # and finally plot figure for channel of choice
     finalFigure(ds_pristine, ds, senses, 'Pz')
