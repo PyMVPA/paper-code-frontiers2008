@@ -93,7 +93,7 @@ data.samples *= 1.0/N.max(N.abs(
 # zscore(data, perchunk=False)
 
 # We might want to rechunk differently and coarsen the chunks
-if False:
+if True:
     data.chunks[data.labels==1] = range(len(data.idsbylabels(1)))
     data.chunks[data.labels==2] = range(len(data.idsbylabels(2)))
     coarsenChunks(data, 10)
@@ -108,23 +108,36 @@ if False:
     trd, ted = splits[0]
     error = te(ted, trd)
 
-# to get results from Figure2A
-cv2A = CrossValidatedTransferError(
-          TransferError(SMLR(lm=0.01)),
-          NFoldSplitter(),
-          enable_states=['confusion', 'training_confusion'])
+best = {}
+for clf in clfs['linear', '!lars'][:1]:#[::-1]:
+    try:                                # since some evil nuSVMs might puke on infeasible default nu
+        # to get results from Figure2A
+        cv2A = CrossValidatedTransferError(
+                  TransferError(clf),
+                  NFoldSplitter(),
+                  enable_states=['confusion', 'training_confusion'])
 
-# to get results from Figure2B
-cv2B = CrossValidatedTransferError(
-          TransferError(SMLR(lm=0.01)),
-          NFoldSplitter(nperlabel='equal',
-                      nrunspersplit=2), # increase to reasonable number
-                      enable_states=['confusion', 'training_confusion'])
+        # to get results from Figure2B
+        cv2B = CrossValidatedTransferError(
+                  TransferError(clf),
+                  NFoldSplitter(nperlabel='equal',
+                                nrunspersplit=2), # increase to reasonable number
+                  enable_states=['confusion', 'training_confusion'])
 
 
-# zscore -- when every sample is in its own chunk 'perchunk' is pointless
-#zscore(data, perchunk=False)
+        verbose(1, "Running cross-validation on %s" % clf.descr)
+        error2A = cv2A(data)
+        verbose(2, "Figure 2A LOO performance:\n%s" % cv2A.confusion) #.asstring(description=True))
+        if best.get('2A', (100, None, None))[0] > error2A:
+            best['2A'] = (error2A, cv2A.confusion, clf.descr)
 
-verbose(1, "Running cross-validation on SMLR")
-#cv2A(data)
-cv2B(data)
+        error2B = cv2B(data)
+        verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
+        if best.get('2B', (100, None, None))[0] > error2B:
+            best['2B'] = (error2B, cv2B.confusion, clf.descr)
+    except:
+        pass
+
+verbose(1, "Best result for 2A was %g achieved on %s, and for 2B was %g achieved using %s" %
+        (best['2A'][0], best['2A'][2],
+         best['2B'][0], best['2B'][2]))
