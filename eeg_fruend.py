@@ -14,6 +14,7 @@ __docformat__ = 'restructuredtext'
 from mvpa.suite import *
 from mvpa.misc.plot.erp import _make_centeredaxis
 import os.path
+from scipy.signal import resample
 
 verbose.level = 4
 
@@ -26,6 +27,9 @@ verbose(1, 'Datapath is %s' % datapath)
 label2id = {'dfn': 1, 'dfo': 2, 'dmn': 3, 'dmo': 4,
              'sfn': 5, 'sfo': 6, 'smn': 7, 'smo': 8}
 id2label = dict( [(x[1], x[0]) for x in label2id.iteritems()])
+
+mode = 'color' # object, delayed
+target_samplingrate = 200.0
 
 
 # plotting helper function
@@ -63,6 +67,19 @@ def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
     return plot
 
 
+def labels2binlabels(ds, mode):
+    if mode == 'delayed':
+        filt = [1, 2, 3, 4]
+    elif mode == 'color':
+        filt = [1, 2, 5, 6]
+    elif mode == 'object':
+        filt = [2, 4, 6, 8]
+    else:
+        raise ValueError, 'Unknown label recoding mode'
+
+    ds.labels[:]=N.array([i in filt for i in ds.labels], dtype='int')
+
+
 # TODO big -- make pymvpa working with string labels
 
 def loadData(subj):
@@ -80,7 +97,27 @@ def loadData(subj):
         else:
             d += t
 
-    return d
+    verbose(1, 'Limit to binary problem: ' + mode)
+    labels2binlabels(d, mode)
+
+    # get data in original shape
+    data = d.O
+    ntimepoints = data.shape[2]
+
+    # downsample data
+    data = resample(data,
+                    ntimepoints * target_samplingrate / d.samplingrate,
+                    window='ham', axis=2)
+    verbose(2, 'Downsampled data to %d Hz' % target_samplingrate)
+
+    # new dt is total length by new timepoints
+    new_dt = ntimepoints * d.dt / data.shape[2]
+
+    # wrap data into new dataset
+    d_new = ChannelDataset(samples=data, labels=d.labels, chunks=d.chunks,
+                           t0=d.t0, dt=new_dt, channelids=d.channelids)
+
+    return d_new
 
 #
 # Just a simple example of ERP plotting
@@ -178,115 +215,71 @@ def finalFigure(origds, mldataset, sens, channel):
     errtype='ste'
 
     fig = P.figure(facecolor='white', figsize=(8,4))
-#    fig.clf()
-    # tricks to get title above all subplots
-#    ax = fig.add_subplot(1, 1, 1, frame_on=False);
-
-    axis_props = dict(color='gray', linewidth=2, markeredgewidth=2, zorder=1)
 
     # plot ERPs
-    ax = fig.add_subplot(3, 1, 1, frame_on=False)
-#    P.title(channel)
-    ax.axison = False
+    ax = fig.add_subplot(2, 1, 1, frame_on=False)
 
-    # TODO:
-    #   resample
-    #   plot sensitivities prior onset
-    #   add sensitivities??? GPR?? I-RELIEF?
-    #   make code below nicer -- MAKE USE OF plotERPs ;-)
-
-    # Might be more consise
-    #
-    # responses = [ origds['labels':i].O[:, ch_of_interest, :]
-    #               for i in [0, 1] ]
-    # dwave =
-    # plotERPs( [{'label':'lineart', 'color':'r', 'data':responses[0]},
-    #            {'label':'picture', 'color':'b', 'data':responses[1]},
-    #            {'label':'dwave',   'color':'x', 'data':dwave, 'pre_mean':0}],
-    #            pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype)
-
-    t1 = plotERP(origds.mapper.reverse(
-                 origds.selectSamples(
-                     origds.labels == 0).samples)[:, ch_of_interest, :],
-                 color='red',
-                 pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
-    t2 = plotERP(origds.mapper.reverse(
-                 origds.selectSamples(
-                     origds.labels == 1).samples)[:, ch_of_interest, :],
-                 color='blue',
-                 pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
-    dwave = N.array(t1 - t2, ndmin=2)
-
-    t2 = plotERP(dwave, color='black',
-                 pre=pre, post=post, SR=SR, ax=ax, errtype='none')
-
-    _make_centeredaxis(ax, 0, offset=0.3, ai=1, mult=-1.0, **axis_props)
+    responses = [ origds['labels', i].O[:, ch_of_interest, :]
+                  for i in [0, 1] ]
+    dwave = N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
+                    ndmin=2)
+    plotERPs( [{'label':'lineart', 'color':'r', 'data':responses[0]},
+               {'label':'picture', 'color':'b', 'data':responses[1]},
+               {'label':'dwave',   'color':'0', 'data':dwave, 'pre_mean':0}],
+               pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
+               xlabel=None)
 
     # plot sensitivities
-    ax = fig.add_subplot(3, 1, 2, frame_on=False)
-    ax.axison = False
+    ax = fig.add_subplot(2, 1, 2, frame_on=False)
 
     sens_labels = []
+    erp_cfgs = []
     colors = ['red', 'green', 'blue', 'cyan']
-    for i, (sid, s) in enumerate(sens):
+
+    for i, (sid, s) in enumerate(sens[::-1]):
         sens_labels.append(sid)
         # back-project
         backproj = mldataset.mapReverse(s)
         # and normalize so that all non-zero weights sum up to 1
-        s_orig = L1Normed(backproj)#, norm=N.mean(backproj > 0))
+        # and scale into digestable range
+        normed_soi = L1Normed(backproj)[:, ch_of_interest, :] * 1000
 
-        soi = s_orig[:, ch_of_interest, :]
-        plotERP(-soi, pre=pre, post=post, SR=SR, ax=ax, errtype=errtype,
-                color=colors[i])
+        erp_cfgs.append(
+            {'label': sid,
+             'color': colors[i],
+             'data' : normed_soi})
+
+    plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype=errtype,
+             ylabel=None)
 
     P.legend(sens_labels)
-    _make_centeredaxis(ax, 0, offset=0.3, ai=1, mult=1000.0, **axis_props)
 
-    # per-channel barplot
-    ax = fig.add_subplot(3, 1, 3, frame_on=False)
-
-    barwidth=0.2
-    ps = []
-    for i, (sid, s) in enumerate(sens):
-        # back-project
-        backproj = mldataset.mapReverse(s)
-        # and normalize so that all non-zero weights sum up to 1
-        s_orig = L1Normed(backproj)#, norm=N.mean(backproj > 0))
-
-        # compute per channel scores (yields nchannels x nchunks)
-        scores = N.sum(s_orig, axis=2).T
-        p = makeBarPlot(scores[:-3], labels=origds.channelids[:-3],
-                    width=barwidth, offset=barwidth*i, color=colors[i])
-        ps.append(p)
-
-    P.legend( [p[0] for p in ps], sens_labels, loc=2)
-
+#    # per-channel barplot
+#    ax = fig.add_subplot(3, 1, 3, frame_on=False)
+#
+#    barwidth=0.2
+#    ps = []
+#    for i, (sid, s) in enumerate(sens):
+#        # back-project
+#        backproj = mldataset.mapReverse(s)
+#        # and normalize so that all non-zero weights sum up to 1
+#        s_orig = L1Normed(backproj)#, norm=N.mean(backproj > 0))
+#
+#        # compute per channel scores (yields nchannels x nchunks)
+#        scores = N.sum(s_orig, axis=2).T
+#        p = makeBarPlot(scores[:-3], labels=origds.channelids[:-3],
+#                    width=barwidth, offset=barwidth*i, color=colors[i])
+#        ps.append(p)
+#
+#    P.legend( [p[0] for p in ps], sens_labels, loc=2)
+#
     P.show()
 
-
-
-def labels2binlabels(ds, mode):
-    if mode == 'delayed':
-        filt = [1, 2, 3, 4]
-    elif mode == 'color':
-        filt = [1, 2, 5, 6]
-    elif mode == 'object':
-        filt = [2, 4, 6, 8]
-    else:
-        raise ValueError, 'Unknown label recoding mode'
-
-    ds.labels[:]=N.array([i in filt for i in ds.labels], dtype='int')
 
 
 if __name__ == '__main__':
     # load dataset for some subject
     ds=loadData('ga14')
-
-    mode = 'color' # object, delayed
-
-    # limit to binary problem
-    verbose(1, 'Limit to binary problem: ' + mode)
-    labels2binlabels(ds, mode)
 
     # artificially group into chunks
     nchunks = 6
@@ -312,7 +305,7 @@ if __name__ == '__main__':
     # throw away EOG channels
     mask[-3:] = False
     # throw away timepoints prior onset
-    mask[:, :int(-ds.t0 * ds.samplingrate)] = False
+#    mask[:, :int(-ds.t0 * ds.samplingrate)] = False
 
     print ds.summary()
     # apply selection
@@ -356,8 +349,8 @@ if __name__ == '__main__':
         sensitivities = N.array(cv.harvested.values()[0])
         # and store
         senses.append(
-            (label + ' (%i\% corr.) weights' \
-                % cv.confusion._ConfusionMatrix__stats['CORR'],
+            (label + ' (%.2f%% corr.) weights' \
+                % cv.confusion.stats['ACC'],
              sensitivities))
         # XXX: Do I really need to go through the valley of pain to get the
         #      accuracy?
@@ -382,7 +375,6 @@ if __name__ == '__main__':
 
     # (re)get pristine dataset for plotting of ERPs
     ds_pristine=loadData('ga14')
-    labels2binlabels(ds_pristine, mode)
 
     # and finally plot figure for channel of choice
     finalFigure(ds_pristine, ds, senses, 'Pz')
