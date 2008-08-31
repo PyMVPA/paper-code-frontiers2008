@@ -30,7 +30,7 @@ if not locals().has_key('__IP'):
 else:
     class O(object): pass
     options = O()
-    options.wavelet_family = None#'db2'
+    options.wavelet_family = None
     options.wavelet_decomposition = 'dwt'
     options.zscore = False
     options.do_lfp = False
@@ -67,40 +67,45 @@ def clf_dummy(ds):
     #
     verbose(1, "Sweeping through classifiers with NFold splitter for generalization")
 
-    dsc = removeInvariantFeatures(ds)
-    verbose(2, "Removed invariant features. Got %d out of %d features" % (dsc.nfeatures, ds.nfeatures))
+    #dsc = removeInvariantFeatures(ds)
+    #verbose(2, "Removed invariant features. Got %d out of %d features" % (dsc.nfeatures, ds.nfeatures))
+    dsc = ds
     best_ACC = 0
     best_MCC = -1
     for clf_ in clfs['smlr', 'multiclass']:
       #clfs['sg', 'svm', 'multiclass'] + clfs['gpr', 'multiclass'] + clfs['smlr', 'multiclass']:
-      for clf in [ FeatureSelectionClassifier(
-                     clf_,
-                     SensitivityBasedFeatureSelection(
-                       OneWayAnova(),
-                       FractionTailSelector(0.010, mode='select', tail='upper')),
-                     descr="%s on 1%%(ANOVA)" % clf_.descr),
-                   FeatureSelectionClassifier(
-                     clf_,
-                     SensitivityBasedFeatureSelection(
-                       OneWayAnova(),
-                       FractionTailSelector(0.05, mode='select', tail='upper')),
-                     descr="%s on 5%%(ANOVA)" % clf_.descr),
-                   #FeatureSelectionClassifier(
-                   #  clf_,
-                   #  SensitivityBasedFeatureSelection(
-                   #    OneWayAnova(),
-                   #    FractionTailSelector(0.10, mode='select', tail='upper')),
-                   #  descr="%s on 10%%(ANOVA)" % clf_.descr),
-                   #clf_
-                  ]:
+      for clf in [clf_]: #[ FeatureSelectionClassifier(
+                 #    clf_,
+                 #    SensitivityBasedFeatureSelection(
+                 #      OneWayAnova(),
+                 #      FractionTailSelector(0.010, mode='select', tail='upper')),
+                 #    descr="%s on 1%%(ANOVA)" % clf_.descr),
+                 #  FeatureSelectionClassifier(
+                 #    clf_,
+                 #    SensitivityBasedFeatureSelection(
+                 #      OneWayAnova(),
+                 #      FractionTailSelector(0.05, mode='select', tail='upper')),
+                 #    descr="%s on 5%%(ANOVA)" % clf_.descr),
+                 #  #FeatureSelectionClassifier(
+                 #  #  clf_,
+                 #  #  SensitivityBasedFeatureSelection(
+                 #  #    OneWayAnova(),
+                 #  #    FractionTailSelector(0.10, mode='select', tail='upper')),
+                 #  #  descr="%s on 10%%(ANOVA)" % clf_.descr),
+                 #  #clf_
+                 # ]:
         cv = CrossValidatedTransferError(
             TransferError(clf),
             NFoldSplitter(),
+            harvest_attribs=\
+              ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
             enable_states=['confusion', 'training_confusion'])
         verbose(2, "Classifier " + clf.descr, lf=False)
         error = cv(dsc)
         tstats = cv.training_confusion.stats
         stats = cv.confusion.stats
+        sensitivities = N.array(cv.harvested.values()[0])
+
         mMCC = N.mean(stats['MCC'])
         if stats['ACC'] > best_ACC:
             best_ACC = stats['ACC']
@@ -113,6 +118,55 @@ def clf_dummy(ds):
             print str(cv.confusion)
     verbose(1, "Best results were ACC=%.2g MCC=%.2g" % (best_ACC, best_MCC))
 
+def do_plots():
+
+    sana = te.clf.getSensitivityAnalyzer(force_training=False, combiner=lambda x:x)
+    sens = sana()
+    sensO = ds.mapReverse(sens.T)
+    sensOn = L2Normed(sensO)
+
+    # Sum of sensitivities across time bins -- so per each neuron/class
+    sensOn_perneuron1 = N.sum(sensOn, axis=1)
+
+    fig = P.figure(figsize=(6, 10))
+    nsx = 1
+    nsy = 3
+    fi = 1
+    c_n_aspect = 6.0                           # aspect ratio for class x neurons
+    c_tb_aspect = 401/105.0*c_n_aspect         # aspect ratio for class x time
+
+    # Lets plot mean counts per each class
+    ax = fig.add_subplot(nsy, nsx, fi); fi += 1
+    dsO = ds.O
+    mcounts = []
+    for l in ds.UL:
+        mcounts += [P.sum(P.sum(dsO[ds.labels == l, :, :], axis=0), axis=1)]
+    mcounts = N.array(mcounts)
+    P.imshow(mcounts, interpolation='nearest', aspect=c_tb_aspect)
+    P.xlabel('Time')
+    P.ylabel('Classes')
+    P.title('Spike counts across all neurons')
+    P.colorbar(shrink=1.0)
+
+    ax = fig.add_subplot(nsy, nsx, fi); fi += 1
+    # TODO: proper labels on y-axis
+    P.imshow(sensOn_perneuron1, interpolation='nearest', origin='lower', aspect=c_n_aspect);
+    P.xlabel('Neurons')
+    P.ylabel('Classes')
+    P.title('Neurons sensitivities')
+    P.colorbar(shrink=1.0)
+
+    ax = fig.add_subplot(nsy, nsx, fi); fi += 1
+    sensOn_perneuron = N.sum(sensOn_perneuron1, axis=0)
+    # Strongest neurons -- strongest first
+    strongest_neurons = N.where(sensOn_perneuron>=N.sort(sensOn_perneuron)[-10])[0][::-1]
+
+    # Lets plot sensitivities in time bins per each class for few 'strongest'
+    P.imshow(sensOn[:, :, strongest_neurons[0]], interpolation='nearest', aspect=c_tb_aspect)
+    P.xlabel('Time')
+    P.ylabel('Classes')
+    P.title('Neuron #%d sensitivity' % strongest_neurons[0])
+    P.colorbar(shrink=1.0)
 def main():
     # TODO we need to make EEPBin available from the EEPDataset
     # DONE some basic assignment of attributes to dsattr
@@ -149,4 +203,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    pass
+#    main()
+
