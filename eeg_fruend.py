@@ -139,7 +139,7 @@ def plot_ERP(ds, addon=None):
 
     # Nice to see the truth behind the bars ;-)
 #    for errtype in ['std', 'ste']:
-    errtype='ste'
+    errtype='std'
 
     fig = P.figure(facecolor='white', figsize=(8,4))
 #    fig.clf()
@@ -212,7 +212,7 @@ def finalFigure(origds, mldataset, sens, channel):
     ch_of_interest = origds.channelids.index(channel)
 
     # error type to use in all plots
-    errtype='ste'
+    errtype='std'
 
     fig = P.figure(facecolor='white', figsize=(8,4))
 
@@ -242,7 +242,8 @@ def finalFigure(origds, mldataset, sens, channel):
         backproj = mldataset.mapReverse(s)
         # and normalize so that all non-zero weights sum up to 1
         # and scale into digestable range
-        normed_soi = L1Normed(backproj)[:, ch_of_interest, :] * 1000
+        # finally, all sensitivities as absolute values
+        normed_soi = Absolute(L2Normed(backproj)[:, ch_of_interest, :] * 1000)
 
         erp_cfgs.append(
             {'label': sid,
@@ -263,7 +264,7 @@ def finalFigure(origds, mldataset, sens, channel):
 #        # back-project
 #        backproj = mldataset.mapReverse(s)
 #        # and normalize so that all non-zero weights sum up to 1
-#        s_orig = L1Normed(backproj)#, norm=N.mean(backproj > 0))
+#        s_orig = L2Normed(backproj)#, norm=N.mean(backproj > 0))
 #
 #        # compute per channel scores (yields nchannels x nchunks)
 #        scores = N.sum(s_orig, axis=2).T
@@ -325,8 +326,10 @@ if __name__ == '__main__':
     splttr = NFoldSplitter()
 
     # some classifiers to test
-    clfs = {'SMLR': SMLR(lm=0.1),
+    clfs = {
+            'SMLR': SMLR(lm=0.1),
             'lCSVM': LinearCSVMC(),
+            'lGPR': GPR(kernel=KernelLinear()),
            }
 
     # run classifiers in cross-validation
@@ -356,8 +359,11 @@ if __name__ == '__main__':
         #      accuracy?
 
     verbose(1, 'Computing additional sensitvities')
-    # define some sensitivities
-    sensanas={'ANOVA': OneWayAnova()
+    # define some pure sensitivities (or related measures)
+    sensanas={
+              'ANOVA': OneWayAnova(),
+              # no I-RELIEF for now -- takes too long
+              #'I-RELIEF': IterativeReliefOnline(transformer=N.abs),
               # gimme more !!
              }
 
