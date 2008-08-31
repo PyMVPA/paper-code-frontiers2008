@@ -105,24 +105,9 @@ def loadData(subj):
     verbose(1, 'Limit to binary problem: ' + mode)
     labels2binlabels(d, mode)
 
-    # get data in original shape
-    data = d.O
-    ntimepoints = data.shape[2]
+    # downsample and return
+    return d.resample(sr=200)
 
-    # downsample data
-    data = resample(data,
-                    ntimepoints * target_samplingrate / d.samplingrate,
-                    window='ham', axis=2)
-    verbose(2, 'Downsampled data to %d Hz' % target_samplingrate)
-
-    # new dt is total length by new timepoints
-    new_dt = ntimepoints * d.dt / data.shape[2]
-
-    # wrap data into new dataset
-    d_new = ChannelDataset(samples=data, labels=d.labels, chunks=d.chunks,
-                           t0=d.t0, dt=new_dt, channelids=d.channelids)
-
-    return d_new
 
 #
 # Just a simple example of ERP plotting
