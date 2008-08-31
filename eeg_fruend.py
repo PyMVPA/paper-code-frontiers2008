@@ -68,34 +68,39 @@ def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
 
 
 def labels2binlabels(ds, mode):
-    if mode == 'delayed':
-        filt = [1, 2, 3, 4]
-    elif mode == 'color':
-        filt = [1, 2, 5, 6]
-    elif mode == 'object':
-        filt = [2, 4, 6, 8]
-    else:
-        raise ValueError, 'Unknown label recoding mode'
+    try:
+        filt = {'delayed': [1, 2, 3, 4],
+                'color':   [1, 2, 5, 6],
+                'object':  [2, 4, 6, 8]}[mode]
+    except KeyError:
+        raise ValueError, 'Unknown label recoding mode %s' % mode
+
+    # XXX N.setmember1d should do smth like what we need but it does
+    #     smth else ;-)
+    # ACTUALLY: this should work:
+    # N.logical_or.reduce(dataset.labels[:,None] == filt, axis=1).astype(int)
+    # it seems not to be shorter though ;-) but more efficient! (may be ;-))
 
     ds.labels[:]=N.array([i in filt for i in ds.labels], dtype='int')
+
+    # also we have now where, so smth like
+    # l1 = ds.where(labels=[filt]); ds.labels[:] = 0; ds.labels[l1] = 1
+    # should do
 
 
 # TODO big -- make pymvpa working with string labels
 
 def loadData(subj):
-    d = None
+    ds = []                             # list of datasets
 
     verbose(1, "Loading EEG data from basepath %s" % datapath)
     for k, v in id2label.iteritems():
         filename = os.path.join(datapath, subj, v + '.bin')
         verbose(2, "Loading data '%s' with labels '%i'" % (v, k))
 
-        t = EEPDataset(filename, labels=k)
+        ds += [EEPDataset(filename, labels=k)]
 
-        if d is None:
-            d = t
-        else:
-            d += t
+    d = reduce(lambda x,y: x+y, ds)     # combine into a single dataset
 
     verbose(1, 'Limit to binary problem: ' + mode)
     labels2binlabels(d, mode)
