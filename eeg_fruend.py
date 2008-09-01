@@ -7,14 +7,11 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Simply functors that transform something."""
 
 __docformat__ = 'restructuredtext'
 
 from mvpa.suite import *
-from mvpa.misc.plot.erp import _make_centeredaxis
 import os.path
-from scipy.signal import resample
 
 verbose.level = 4
 
@@ -88,8 +85,6 @@ def labels2binlabels(ds, mode):
     # should do
 
 
-# TODO big -- make pymvpa working with string labels
-
 def loadData(subj):
     ds = []                             # list of datasets
 
@@ -105,87 +100,10 @@ def loadData(subj):
     verbose(1, 'Limit to binary problem: ' + mode)
     labels2binlabels(d, mode)
 
-    # downsample and return
-    return d.resample(sr=200)
+    d = d.resample(sr=target_samplingrate)
+    verbose(2, 'Downsampled data to %.1f Hz' % d.samplingrate)
 
-
-#
-# Just a simple example of ERP plotting
-#
-# XXX: might vanish now
-#
-def plot_ERP(ds, addon=None):
-    # sampling rate
-    SR = ds.samplingrate
-    # data is already trials, this would correspond sec before onset
-    pre = -ds.t0
-    # number of channels, samples per trial
-    nchannels, spt = ds.mapper.mask.shape
-    post = spt * 1.0/ SR - pre # compute seconds in trials after onset
-
-    # map from channel name to index
-#    ch_map = dict(zip(ds.channelids, xrange(nchannels)))
-#    ch_of_interest = ch_map['Pz']
-
-    # Nice to see the truth behind the bars ;-)
-#    for errtype in ['std', 'ste']:
-    errtype='std'
-
-    fig = P.figure(facecolor='white', figsize=(8,4))
-#    fig.clf()
-    # tricks to get title above all subplots
-#    ax = fig.add_subplot(1, 1, 1, frame_on=False);
-
-#    P.title("Mimique of Figure 5 with error being %s " % errtype)
-    # Lets plot few ERPs. Attempt to replicate Figure 5
-    # Misfits:
-    #  * range of results is completely different, so what scaling of the data
-    #  * ERPs of figures are reported to diverge into positive side although from
-    #    our plots we see that first we get N-peak
-    #  * ERPs in the article are nice and smooth ;-) here we see the reality. May be ERPs were
-    #    computed at different samples rate, rereferenced?
-#        diff = ds.selectSamples(ds.labels == 0).samples \
-#               - ds.selectSamples(ds.labels == 1).samples
-    # for a nice selection
-#    channels_oi = ['P7', 'P3', 'Pz', 'O1', 'O2', 'CP1']
-    for nchannel, channel in enumerate(ds.channelids):
-    #for nchannel, channel in enumerate(channels_oi):
-        ch_of_interest = ds.channelids.index(channel)
-        ax = fig.add_subplot(6, 6, nchannel+1, frame_on=False)
-#        ax = fig.add_subplot(2, 3, nchannel+1, frame_on=False)
-        P.title(channel)
-        ax.axison = False
-        t1 = plotERP(ds.mapper.reverse(
-                     ds.selectSamples(
-                         ds.labels == 0).samples)[:, ch_of_interest, :],
-                     color='red',
-                     pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
-        t2 = plotERP(ds.mapper.reverse(
-                     ds.selectSamples(
-                         ds.labels == 1).samples)[:, ch_of_interest, :],
-                     color='blue',
-                     pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
-        dwave = N.array(t1 - t2, ndmin=2)
-        t2 = plotERP(dwave, color='black',
-                     pre=pre, post=post, SR=SR, ax=ax, errtype='none')
-        if not addon is None:
-            addon_oi = addon[:, ch_of_interest, :]
-            print dwave.max(),addon_oi.max()
-            # scale to same max as dwave
-            plotERP(dwave.max()/addon_oi.max() * addon_oi, color='green',
-                         pre=pre, post=post, SR=SR, ax=ax, errtype=errtype)
-
-        P.axhline(y=0, color='gray')
-#        props = dict(color='gray', linewidth=2, markeredgewidth=2, zorder=1)
-        # should become public
-#        _make_centeredaxis(ax, 0, offset=0.3, ai=1, mult=-1.0, **props)
-
-
-    # XXX yeah... the world is not perfect... with ylim to center them at
-    # the same location we get some problems, thus manual tuning
-    # remove ylim in plot_erps to get somewhat different result without need for this adjust
-    #fig.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, wspace=0.5, hspace=0.65)
-    #P.show()
+    return d
 
 
 def finalFigure(origds, mldataset, sens, channel):
