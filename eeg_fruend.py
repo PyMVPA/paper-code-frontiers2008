@@ -268,8 +268,8 @@ if __name__ == '__main__':
         sensitivities = N.array(cv.harvested.values()[0])
         # and store
         senses.append(
-            (label + ' (%.2f%% corr.) weights' \
-                % cv.confusion.stats['ACC'],
+            (label + ' (%.1f%% corr.) weights' \
+                % cv.confusion.stats['ACC%'],
              sensitivities))
 
     verbose(1, 'Computing additional sensitvities')
