@@ -19,6 +19,10 @@ datapath = os.path.join(cfg.get('paths', 'data root', default='data'),
                         'eeg.fruend')
 verbose(1, 'Datapath is %s' % datapath)
 
+
+sensors = XAVRSensorLocations(os.path.join(datapath, 'xavr1010.dat'))
+verbose(1, 'Loaded sensor information')
+
 # Code our poor labels
 # XXX: only need id2label
 label2id = {'dfn': 1, 'dfo': 2, 'dmn': 3, 'dmo': 4,
@@ -151,7 +155,7 @@ def finalFigure(origds, mldataset, sens, channel):
         # and normalize so that all non-zero weights sum up to 1
         # and scale into digestable range
         # finally, all sensitivities as absolute values
-        normed_soi = Absolute(L2Normed(backproj)[:, ch_of_interest, :] * 1000)
+        normed_soi = L2Normed(Absolute(backproj))[:, ch_of_interest, :] * 1000
 
         erp_cfgs.append(
             {'label': sid,
@@ -163,25 +167,29 @@ def finalFigure(origds, mldataset, sens, channel):
 
     P.legend(sens_labels)
 
-#    # per-channel barplot
-#    ax = fig.add_subplot(3, 1, 3, frame_on=False)
-#
-#    barwidth=0.2
-#    ps = []
-#    for i, (sid, s) in enumerate(sens):
-#        # back-project
-#        backproj = mldataset.mapReverse(s)
-#        # and normalize so that all non-zero weights sum up to 1
-#        s_orig = L2Normed(backproj)#, norm=N.mean(backproj > 0))
-#
-#        # compute per channel scores (yields nchannels x nchunks)
-#        scores = N.sum(s_orig, axis=2).T
-#        p = makeBarPlot(scores[:-3], labels=origds.channelids[:-3],
-#                    width=barwidth, offset=barwidth*i, color=colors[i])
-#        ps.append(p)
-#
-#    P.legend( [p[0] for p in ps], sens_labels, loc=2)
-#
+    # new figure for topographies
+    fig = P.figure(facecolor='white', figsize=(8,4))
+
+    # how many sensitivities do we have
+    nsens = len(sens)
+
+    for i, (sid, s) in enumerate(sens):
+        ax = fig.add_subplot(1, nsens, i+1, frame_on=False)
+        # back-project
+        backproj = mldataset.mapReverse(s)
+        # and normalize so that all non-zero weights sum up to 1
+        s_orig = L2Normed(Absolute(backproj))
+
+        # compute per channel scores (yields nchannels x nchunks)
+        scores = N.sum(s_orig, axis=2).T
+
+        plotHeadTopography(scores[:-3].mean(axis=1), sensors.locations(),
+                           plotsensors=True, resolution=50,
+                           interpolation='nearest')
+        P.clim(vmin=0, vmax=1.0)
+        P.title(sid)
+        P.colorbar()
+
     P.show()
 
 
@@ -263,8 +271,6 @@ if __name__ == '__main__':
             (label + ' (%.2f%% corr.) weights' \
                 % cv.confusion.stats['ACC'],
              sensitivities))
-        # XXX: Do I really need to go through the valley of pain to get the
-        #      accuracy?
 
     verbose(1, 'Computing additional sensitvities')
     # define some pure sensitivities (or related measures)
