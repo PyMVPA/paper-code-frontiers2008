@@ -107,7 +107,7 @@ if __name__ == '__main__':
     print ds.summary()
 
     best = {}
-    for clf in clfs['linear', '!lars']:#[:1]:#[::-1]:
+    for clf in clfs['linear', '!lars', '!blr']:#[:1]:#[::-1]:
         try:# since some evil nuSVMs might puke on infeasible default nu
             # to get results from Figure2A
             cv2A = CrossValidatedTransferError(
