@@ -124,7 +124,7 @@ def finalFigure(origds, mldataset, sens, channel):
     ch_of_interest = origds.channelids.index(channel)
 
     # error type to use in all plots
-    errtype='std'
+    errtype=['ste', 'ci95', 'std']
 
     fig = P.figure(facecolor='white', figsize=(8,4))
 
