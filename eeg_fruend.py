@@ -124,7 +124,7 @@ def finalFigure(origds, mldataset, sens, channel):
     ch_of_interest = origds.channelids.index(channel)
 
     # error type to use in all plots
-    errtype=['ste', 'ci95', 'std']
+    errtype=['std', 'ci95']
 
     fig = P.figure(facecolor='white', figsize=(8,4))
 
@@ -152,18 +152,32 @@ def finalFigure(origds, mldataset, sens, channel):
         sens_labels.append(sid)
         # back-project
         backproj = mldataset.mapReverse(s)
-        # and normalize so that all non-zero weights sum up to 1
-        # and scale into digestable range
-        # finally, all sensitivities as absolute values
-        normed_soi = L2Normed(Absolute(backproj))[:, ch_of_interest, :] * 1000
 
+        # and normalize so that all non-zero weights sum up to 1
+        # ATTN: need to norm sensitivities for each fold on their own --
+        # who knows what's happening otherwise
+        for f in xrange(backproj.shape[0]):
+            backproj[f] = L2Normed(backproj[f])
+
+        # take one channel: yields (nfolds x ntimepoints)
+        ch_sens = backproj[:, ch_of_interest, :]
+
+        # go with abs(), as negative sensitivities are as important
+        # as positive ones
+        # scale into range digestable for plotERPs
+        ch_sens = Absolute(ch_sens) * 10
+
+        # charge ERP definition
         erp_cfgs.append(
             {'label': sid,
              'color': colors[i],
-             'data' : normed_soi})
+             'data' : ch_sens})
 
-    plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype=errtype,
-             ylabel=None)
+    # just ci95 error here, due to the low number of folds not much different
+    # from std; also do _not_ demean based on initial baseline as we want the
+    # untransformed sensitivities
+    plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype='ci95',
+             ylabel=None, pre_mean=0)
 
     P.legend(sens_labels)
 
@@ -175,20 +189,30 @@ def finalFigure(origds, mldataset, sens, channel):
 
     for i, (sid, s) in enumerate(sens):
         ax = fig.add_subplot(1, nsens, i+1, frame_on=False)
-        # back-project
+        # back-project: yields (nfolds x nchannels x ntimepoints)
         backproj = mldataset.mapReverse(s)
-        # and normalize so that all non-zero weights sum up to 1
-        s_orig = L2Normed(Absolute(backproj))
+        # go with abs(), as negative sensitivities are as important
+        # as positive ones
+        backproj = Absolute(backproj)
 
-        # compute per channel scores (yields nchannels x nchunks)
-        scores = N.sum(s_orig, axis=2).T
+        # compute per channel scores and average across folds
+        # (yields (nchannels, )
+        scores = N.sum(backproj, axis=2).mean(axis=0)
 
-        plotHeadTopography(scores[:-3].mean(axis=1), sensors.locations(),
+        # strip EOG scores (which are zero anyway,
+        # as they had been stripped of before cross-validation)
+        scores = scores[:-3]
+
+        # and normalize so that all scores squared sum up to 1
+        scores = L2Normed(scores)
+
+        # plot all EEG sensor scores
+        plotHeadTopography(scores, sensors.locations(),
                            plotsensors=True, resolution=50,
                            interpolation='nearest')
-        P.clim(vmin=0, vmax=1.0)
-        P.title(sid)
+        P.clim(vmin=0, vmax=0.4)
         P.colorbar()
+        P.title(sid + '\n%s=%.3f' % ('Pz', scores[sensors.names.index('Pz')]))
 
     P.show()
 
