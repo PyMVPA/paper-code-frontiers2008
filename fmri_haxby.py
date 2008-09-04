@@ -35,8 +35,8 @@ from nifti import NiftiImage
 
 # Dataset handling
 from mvpa.datasets.nifti import NiftiDataset
-from mvpa.misc.iohelpers import SampleAttributes
-from mvpa.datasets.misc import zscore
+from mvpa.misc.io.base import SampleAttributes
+from mvpa.datasets.miscfx import zscore
 
 # Progress reports and debugging
 from mvpa.base import verbose
