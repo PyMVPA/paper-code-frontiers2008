@@ -36,6 +36,10 @@ target_samplingrate = 200.0
 
 
 # plotting helper function
+
+# XXX not used -- should migrate into mainline PyMVPA?
+# older version is also present in fmri_haxby.py
+#
 def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
                width=0.2, offset=0.2, color='0.6', distance=1.0):
 
@@ -116,7 +120,7 @@ def finalFigure(origds, mldataset, sens, channel):
     # sampling rate
     SR = origds.samplingrate
     # data is already trials, this would correspond sec before onset
-    pre = -origds.t0
+    pre = -(int(origds.t0*100)/100.0)   # round to 2 digits
     # number of channels, samples per trial
     nchannels, spt = origds.mapper.mask.shape
     # compute seconds in trials after onset
@@ -128,7 +132,7 @@ def finalFigure(origds, mldataset, sens, channel):
     # error type to use in all plots
     errtype=['std', 'ci95']
 
-    fig = P.figure(facecolor='white', figsize=(8,4))
+    fig = P.figure(facecolor='white', figsize=(12, 6))
 
     # plot ERPs
     ax = fig.add_subplot(2, 1, 1, frame_on=False)
@@ -141,7 +145,7 @@ def finalFigure(origds, mldataset, sens, channel):
                {'label':'picture', 'color':'b', 'data':responses[1]},
                {'label':'dwave',   'color':'0', 'data':dwave, 'pre_mean':0}],
                pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
-               xlabel=None)
+              ylformat='%d', xlabel=None)
 
     # plot sensitivities
     ax = fig.add_subplot(2, 1, 2, frame_on=False)
@@ -166,7 +170,7 @@ def finalFigure(origds, mldataset, sens, channel):
 
         # go with abs(), as negative sensitivities are as important
         # as positive ones
-        ch_sens = Absolute(ch_sens)
+        #ch_sens = Absolute(ch_sens)
 
         # charge ERP definition
         erp_cfgs.append(
@@ -178,18 +182,18 @@ def finalFigure(origds, mldataset, sens, channel):
     # from std; also do _not_ demean based on initial baseline as we want the
     # untransformed sensitivities
     plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype='ci95',
-             ylabel=None, pre_mean=0)
+             ylabel=None, ylformat='%.2f', pre_mean=0)
 
     P.legend(sens_labels)
-
-    # new figure for topographies
-    fig = P.figure(facecolor='white', figsize=(8,4))
 
     # how many sensitivities do we have
     nsens = len(sens)
 
+    # new figure for topographies
+    fig = P.figure(facecolor='white', figsize=((nsens+1)*3, 4))
+
     for i, (sid, s) in enumerate(sens):
-        ax = fig.add_subplot(1, nsens, i+1, frame_on=False)
+        ax = fig.add_subplot(1, nsens+1, i+1, frame_on=False)
         # back-project: yields (nfolds x nchannels x ntimepoints)
         backproj = mldataset.mapReverse(s)
         # go with abs(), as negative sensitivities are as important
@@ -212,9 +216,21 @@ def finalFigure(origds, mldataset, sens, channel):
                            plotsensors=True, resolution=50,
                            interpolation='nearest')
         P.clim(vmin=0, vmax=0.4)
-        P.colorbar()
-        P.title(sid + '\n%s=%.3f' % ('Pz', scores[sensors.names.index('Pz')]))
+        # No need for full title
+        # P.title(sid + '\n%s=%.3f' % ('Pz', scores[sensors.names.index('Pz')]))
+        P.title(re.sub(' .*', '', sid)) # just plot name
 
+        axis = P.axis()                 # to preserve original size
+        # Draw a color 'bar' for the given sensitivity
+        ax.bar(-0.4, 0.1, 0.8, 1.4, color=colors[i], edgecolor=colors[i]);
+        P.axis(axis)
+
+    ax = fig.add_subplot(1, nsens+1, nsens+1, frame_on=False)
+    cb = P.colorbar(shrink=0.95, fraction=0.05, drawedges=False,
+                    ticks=[0, 0.1, 0.2, 0.3, 0.4])
+    ax.axison = False
+    # Expand things a bit
+    fig.subplots_adjust(left=0.06, right=1.05, bottom=0.01, wspace=-0.2)
     P.show()
 
 
@@ -260,7 +276,7 @@ if __name__ == '__main__':
         zscore(ds, perchunk=True)
     print ds.summary()
 
-    doAnalyses = False
+    doAnalyses = True
     if doAnalyses == True:
         # eats all sensitivities
         senses = []
@@ -321,7 +337,7 @@ if __name__ == '__main__':
             senses.append((k, sa.maps))
 
         # save countless hours of time ;-)
-        picklefile = open(os.path.join(datapath, subj + '_pickled.dat', 'w'))
+        picklefile = open(os.path.join(datapath, subj + '_pickled.dat'), 'w')
         cPickle.dump(senses, picklefile)
         picklefile.close()
     else: # if not doing analyses just load pickled results
