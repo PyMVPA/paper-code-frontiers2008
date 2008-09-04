@@ -166,8 +166,7 @@ def finalFigure(origds, mldataset, sens, channel):
 
         # go with abs(), as negative sensitivities are as important
         # as positive ones
-        # scale into range digestable for plotERPs
-        ch_sens = Absolute(ch_sens) * 10
+        ch_sens = Absolute(ch_sens)
 
         # charge ERP definition
         erp_cfgs.append(
