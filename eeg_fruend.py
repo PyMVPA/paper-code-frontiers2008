@@ -12,6 +12,7 @@ __docformat__ = 'restructuredtext'
 
 from mvpa.suite import *
 import os.path
+import cPickle
 
 verbose.level = 4
 
@@ -19,6 +20,7 @@ datapath = os.path.join(cfg.get('paths', 'data root', default='data'),
                         'eeg.fruend')
 verbose(1, 'Datapath is %s' % datapath)
 
+subj = 'ga14'
 
 sensors = XAVRSensorLocations(os.path.join(datapath, 'xavr1010.dat'))
 verbose(1, 'Loaded sensor information')
@@ -146,7 +148,7 @@ def finalFigure(origds, mldataset, sens, channel):
 
     sens_labels = []
     erp_cfgs = []
-    colors = ['red', 'green', 'blue', 'cyan']
+    colors = ['red', 'green', 'blue', 'cyan', 'magenta']
 
     for i, (sid, s) in enumerate(sens[::-1]):
         sens_labels.append(sid)
@@ -220,7 +222,7 @@ def finalFigure(origds, mldataset, sens, channel):
 
 if __name__ == '__main__':
     # load dataset for some subject
-    ds=loadData('ga14')
+    ds=loadData(subj)
 
     # artificially group into chunks
     nchunks = 6
@@ -259,66 +261,77 @@ if __name__ == '__main__':
         zscore(ds, perchunk=True)
     print ds.summary()
 
-    # eats all sensitivities
-    senses = []
+    doAnalyses = False
+    if doAnalyses == True:
+        # eats all sensitivities
+        senses = []
 
-    # splitter to use for all analyses
-    splttr = NFoldSplitter()
+        # splitter to use for all analyses
+        splttr = NFoldSplitter()
 
-    # some classifiers to test
-    clfs = {
-            'SMLR': SMLR(lm=0.1),
-            'lCSVM': LinearCSVMC(),
-            'lGPR': GPR(kernel=KernelLinear()),
-           }
+        # some classifiers to test
+        clfs = {
+                'SMLR': SMLR(lm=0.1),
+                'lCSVM': LinearCSVMC(),
+                'lGPR': GPR(kernel=KernelLinear()),
+               }
 
-    # run classifiers in cross-validation
-    for label, clf in clfs.iteritems():
-        cv = \
-          CrossValidatedTransferError(
-            TransferError(clf),
-            splttr,
-            harvest_attribs=\
-              ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
-            enable_states=['confusion', 'training_confusion'])
+        # run classifiers in cross-validation
+        for label, clf in clfs.iteritems():
+            cv = \
+              CrossValidatedTransferError(
+                TransferError(clf),
+                splttr,
+                harvest_attribs=\
+                  ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
+                enable_states=['confusion', 'training_confusion'])
 
-        verbose(1, 'Doing cross-validation with ' + label)
-        # run cross-validation
-        merror = cv(ds)
-        verbose(1, 'Accumulated confusion matrix for out-of-sample tests')
-        print cv.confusion
+            verbose(1, 'Doing cross-validation with ' + label)
+            # run cross-validation
+            merror = cv(ds)
+            verbose(1, 'Accumulated confusion matrix for out-of-sample tests')
+            print cv.confusion
 
-        # get harvested sensitivities for all splits
-        sensitivities = N.array(cv.harvested.values()[0])
-        # and store
-        senses.append(
-            (label + ' (%.1f%% corr.) weights' \
-                % cv.confusion.stats['ACC%'],
-             sensitivities))
+            # get harvested sensitivities for all splits
+            sensitivities = N.array(cv.harvested.values()[0])
+            # and store
+            senses.append(
+                (label + ' (%.1f%% corr.) weights' \
+                    % cv.confusion.stats['ACC%'],
+                 sensitivities))
 
-    verbose(1, 'Computing additional sensitvities')
-    # define some pure sensitivities (or related measures)
-    sensanas={
-              'ANOVA': OneWayAnova(),
-              # no I-RELIEF for now -- takes too long
-              #'I-RELIEF': IterativeReliefOnline(transformer=N.abs),
-              # gimme more !!
-             }
+        verbose(1, 'Computing additional sensitvities')
+        # define some pure sensitivities (or related measures)
+        sensanas={
+                  'ANOVA': OneWayAnova(),
+                  # no I-RELIEF for now -- takes too long
+                  'I-RELIEF': IterativeReliefOnline(),
+                  # gimme more !!
+                 }
 
-    # wrapper everything into SplitFeaturewiseMeasure
-    # to get sense of variance across our artificial splits
-    # compute additional sensitivities
-    for k, v in sensanas.iteritems():
-        verbose(2, 'Computing: ' + k)
-        sa = SplitFeaturewiseMeasure(v, splttr,
-                                     enable_states=['maps'])
-        # compute sensitivities
-        sa(ds)
-        # and grab them for all splits
-        senses.append((k, sa.maps))
+        # wrapper everything into SplitFeaturewiseMeasure
+        # to get sense of variance across our artificial splits
+        # compute additional sensitivities
+        for k, v in sensanas.iteritems():
+            verbose(2, 'Computing: ' + k)
+            sa = SplitFeaturewiseMeasure(v, splttr,
+                                         enable_states=['maps'])
+            # compute sensitivities
+            sa(ds)
+            # and grab them for all splits
+            senses.append((k, sa.maps))
+
+        # save countless hours of time ;-)
+        picklefile = open(os.path.join(datapath, subj + '_pickled.dat', 'w'))
+        cPickle.dump(senses, picklefile)
+        picklefile.close()
+    else: # if not doing analyses just load pickled results
+        picklefile = open(os.path.join(datapath, subj + '_pickled.dat'))
+        senses = cPickle.load(picklefile)
+        picklefile.close()
 
     # (re)get pristine dataset for plotting of ERPs
-    ds_pristine=loadData('ga14')
+    ds_pristine=loadData(subj)
 
     # and finally plot figure for channel of choice
     finalFigure(ds_pristine, ds, senses, 'Pz')
