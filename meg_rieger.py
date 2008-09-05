@@ -2,7 +2,24 @@
 #emacs: -*- mode: python-mode; py-indent-offset: 4; indent-tabs-mode: nil -*-
 #ex: set sts=4 ts=4 sw=4 et:
 
+#
+# Main idea for MEG analysis example might be -- finding best wavelet component(s) providing
+# nice generalization
+#
+
 from mvpa.suite import *
+
+if not locals().has_key('__IP'):
+    opt.verbose.default = 3                    # for now
+    parser.add_options([opt.zscore])
+    parser.option_groups = [opts.common, opts.wavelet]
+    (options, files) = parser.parse_args()
+else:
+    class O(object): pass
+    options = O()
+    options.wavelet_family = None
+    options.wavelet_decomposition = 'dwt'
+    options.zscore = False
 
 verbose.level = 4
 
@@ -53,6 +70,8 @@ def loadData(subj):
     dataset.substractBaseline()
     verbose(2, 'Substracted %f sec baseline' % N.abs(dataset.t0))
 
+    # XXX shorten a bit please
+    #
     # select time window of interest: from onset to 600 ms after onset
     mask = dataset.mapper.getMask()
     # deselect timespoints prior to onset
@@ -61,8 +80,7 @@ def loadData(subj):
     mask[:, int(N.round((-dataset.t0 + 0.6) * dataset.samplingrate)):] = False
     # finally transform into feature selection list
     mask = dataset.mapForward(mask).nonzero()[0]
-
-    # and apply selectio
+    # and apply selection
     dataset = dataset.selectFeatures(mask)
     verbose(2, 'Applied a-priori feature selection, ' \
                'leaving %i timepoints per channel' % dataset.mapper.dsshape[1])
@@ -94,6 +112,21 @@ if __name__ == '__main__':
     ds = loadData(subj)
 
     print ds.summary()
+
+    if options.wavelet_family is not None:
+        verbose(2, "Converting into wavelets family %s."
+                % options.wavelet_family)
+        ebdata = ds.mapper.reverse(ds.samples)
+        kwargs = {'dim': 1, 'wavelet': options.wavelet_family}
+        if options.wavelet_decomposition == 'dwt':
+            verbose(3, "Doing DWT")
+            WT = WaveletTransformationMapper(**kwargs)
+        else:
+            verbose(3, "Doing DWP")
+            WT = WaveletPacketMapper(**kwargs)
+        ds_orig = ds
+        ebdata_wt = WT(ebdata)
+        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
 
     verbose(1, 'Precondition data')
     doZScore = True
