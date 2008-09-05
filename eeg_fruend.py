@@ -197,12 +197,16 @@ def finalFigure(ds_pristine, ds, senses, channel):
         # back-project: yields (nfolds x nchannels x ntimepoints)
         backproj = ds.mapReverse(sens)
         # go with abs(), as negative sensitivities are as important
-        # as positive ones
-        backproj = Absolute(backproj)
+        # as positive ones...
+        # XXX
+        # YOH: we can do that only after we avg across splits
+        # backproj = Absolute(backproj)
+
+        avgbackproj = backproj.sum(axis=0)
 
         # compute per channel scores and average across folds
         # (yields (nchannels, )
-        scores = N.sum(backproj, axis=2).mean(axis=0)
+        scores = N.sum(Absolute(avgbackproj), axis=1)
 
         # strip EOG scores (which are zero anyway,
         # as they had been stripped of before cross-validation)
@@ -276,8 +280,8 @@ if __name__ == '__main__':
         zscore(ds, perchunk=True)
     print ds.summary()
 
-    doAnalyses = True
-    if doAnalyses == True:
+    do_analyses = True
+    if do_analyses == True:
         # eats all sensitivities
         senses = []
 
@@ -289,7 +293,8 @@ if __name__ == '__main__':
             # explicitly instruct SMLR just to fit a single set of weights for our binary task
             'SMLR': SMLR(lm=0.1, fit_all_weights=False),
             'lCSVM': LinearCSVMC(),
-            #'lGPR': GPR(kernel=KernelLinear()),
+            'sglCSVM': sg.SVM(), # lets see if we observe the same flip effect
+            'lGPR': GPR(kernel=KernelLinear()),
             }
 
         # run classifiers in cross-validation
@@ -301,6 +306,8 @@ if __name__ == '__main__':
                 harvest_attribs=\
                   ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None)()'],
                 enable_states=['confusion', 'training_confusion'])
+            # we might need to device some 'CommonSide' transformer so all
+            # sensitivities point to the 'approx' the same side. Now we have them flipped -- SVM vs GPR/SMLR
 
             verbose(1, 'Doing cross-validation with ' + label)
             # run cross-validation
