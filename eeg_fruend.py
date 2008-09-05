@@ -116,18 +116,18 @@ def loadData(subj):
     return d
 
 
-def finalFigure(origds, mldataset, sens, channel):
+def finalFigure(ds_pristine, ds, senses, channel):
     # sampling rate
-    SR = origds.samplingrate
+    SR = ds_pristine.samplingrate
     # data is already trials, this would correspond sec before onset
-    pre = -(int(origds.t0*100)/100.0)   # round to 2 digits
+    pre = -(int(ds_pristine.t0*100)/100.0)   # round to 2 digits
     # number of channels, samples per trial
-    nchannels, spt = origds.mapper.mask.shape
+    nchannels, spt = ds_pristine.mapper.mask.shape
     # compute seconds in trials after onset
     post = spt * 1.0/ SR - pre
 
     # index of the channel of interest
-    ch_of_interest = origds.channelids.index(channel)
+    ch_of_interest = ds_pristine.channelids.index(channel)
 
     # error type to use in all plots
     errtype=['std', 'ci95']
@@ -137,7 +137,7 @@ def finalFigure(origds, mldataset, sens, channel):
     # plot ERPs
     ax = fig.add_subplot(2, 1, 1, frame_on=False)
 
-    responses = [ origds['labels', i].O[:, ch_of_interest, :]
+    responses = [ ds_pristine['labels', i].O[:, ch_of_interest, :]
                   for i in [0, 1] ]
     dwave = N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
                     ndmin=2)
@@ -154,10 +154,10 @@ def finalFigure(origds, mldataset, sens, channel):
     erp_cfgs = []
     colors = ['red', 'green', 'blue', 'cyan', 'magenta']
 
-    for i, (sid, s) in enumerate(sens[::-1]):
-        sens_labels.append(sid)
+    for i, (sens_id, sens) in enumerate(senses[::-1]):
+        sens_labels.append(sens_id)
         # back-project
-        backproj = mldataset.mapReverse(s)
+        backproj = ds.mapReverse(sens)
 
         # and normalize so that all non-zero weights sum up to 1
         # ATTN: need to norm sensitivities for each fold on their own --
@@ -174,7 +174,7 @@ def finalFigure(origds, mldataset, sens, channel):
 
         # charge ERP definition
         erp_cfgs.append(
-            {'label': sid,
+            {'label': sens_id,
              'color': colors[i],
              'data' : ch_sens})
 
@@ -187,15 +187,15 @@ def finalFigure(origds, mldataset, sens, channel):
     P.legend(sens_labels)
 
     # how many sensitivities do we have
-    nsens = len(sens)
+    nsens = len(senses)
 
     # new figure for topographies
     fig = P.figure(facecolor='white', figsize=((nsens+1)*3, 4))
 
-    for i, (sid, s) in enumerate(sens):
+    for i, (sens_id, sens) in enumerate(senses):
         ax = fig.add_subplot(1, nsens+1, i+1, frame_on=False)
         # back-project: yields (nfolds x nchannels x ntimepoints)
-        backproj = mldataset.mapReverse(s)
+        backproj = ds.mapReverse(sens)
         # go with abs(), as negative sensitivities are as important
         # as positive ones
         backproj = Absolute(backproj)
@@ -217,8 +217,8 @@ def finalFigure(origds, mldataset, sens, channel):
                            interpolation='nearest')
         P.clim(vmin=0, vmax=0.4)
         # No need for full title
-        # P.title(sid + '\n%s=%.3f' % ('Pz', scores[sensors.names.index('Pz')]))
-        P.title(re.sub(' .*', '', sid)) # just plot name
+        # P.title(sens_id + '\n%s=%.3f' % ('Pz', scores[sensors.names.index('Pz')]))
+        P.title(re.sub(' .*', '', sens_id)) # just plot name
 
         axis = P.axis()                 # to preserve original size
         # Draw a color 'bar' for the given sensitivity
@@ -286,10 +286,11 @@ if __name__ == '__main__':
 
         # some classifiers to test
         clfs = {
-                'SMLR': SMLR(lm=0.1),
-                'lCSVM': LinearCSVMC(),
-                'lGPR': GPR(kernel=KernelLinear()),
-               }
+            # explicitly instruct SMLR just to fit a single set of weights for our binary task
+            'SMLR': SMLR(lm=0.1, fit_all_weights=False),
+            'lCSVM': LinearCSVMC(),
+            #'lGPR': GPR(kernel=KernelLinear()),
+            }
 
         # run classifiers in cross-validation
         for label, clf in clfs.iteritems():
@@ -298,7 +299,7 @@ if __name__ == '__main__':
                 TransferError(clf),
                 splttr,
                 harvest_attribs=\
-                  ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
+                  ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None)()'],
                 enable_states=['confusion', 'training_confusion'])
 
             verbose(1, 'Doing cross-validation with ' + label)
@@ -320,7 +321,7 @@ if __name__ == '__main__':
         sensanas={
                   'ANOVA': OneWayAnova(),
                   # no I-RELIEF for now -- takes too long
-                  'I-RELIEF': IterativeReliefOnline(),
+                  #'I-RELIEF': IterativeReliefOnline(),
                   # gimme more !!
                  }
 
