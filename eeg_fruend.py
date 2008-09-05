@@ -11,7 +11,7 @@
 __docformat__ = 'restructuredtext'
 
 from mvpa.suite import *
-import os.path
+from warehouse import doSensitivityAnalysis
 import cPickle
 
 verbose.level = 4
@@ -33,45 +33,6 @@ id2label = dict( [(x[1], x[0]) for x in label2id.iteritems()])
 
 mode = 'color' # object, delayed
 target_samplingrate = 200.0
-
-
-# plotting helper function
-
-# XXX not used -- should migrate into mainline PyMVPA?
-# older version is also present in fmri_haxby.py
-#
-def makeBarPlot(data, labels=None, title=None, ylim=None, ylabel=None,
-               width=0.2, offset=0.2, color='0.6', distance=1.0):
-
-    # determine location of bars
-    xlocations = (N.arange(len(data)) * distance) + offset
-
-    # work with arrays
-    data = N.array(data)
-
-    # plot bars
-    plot = P.bar(xlocations,
-                 data.mean(axis=1),
-                 yerr=data.std(axis=1) / N.sqrt(data.shape[1]),
-                 width=width,
-                 color=color,
-                 ecolor='black')
-
-    if ylim:
-        P.ylim(*(ylim))
-    if title:
-        P.title(title)
-
-    if labels:
-        P.xticks(xlocations + width / 2, labels)
-
-    if ylabel:
-        P.ylabel(ylabel)
-
-    # leave some space after last bar
-    P.xlim(0, xlocations[-1] + width + offset)
-
-    return plot
 
 
 def labels2binlabels(ds, mode):
@@ -168,9 +129,12 @@ def finalFigure(ds_pristine, ds, senses, channel):
         # take one channel: yields (nfolds x ntimepoints)
         ch_sens = backproj[:, ch_of_interest, :]
 
-        # go with abs(), as negative sensitivities are as important
-        # as positive ones
-        #ch_sens = Absolute(ch_sens)
+        # sign of sensitivities is more or less arbitrary, but when flipped
+        # to have to big bump in the middle on the positive side, they all
+        # really look like the diff wave -- maybe need some better
+        # justification ;-)
+        if ch_sens.mean() < 0:
+            ch_sens *= -1
 
         # charge ERP definition
         erp_cfgs.append(
@@ -198,11 +162,8 @@ def finalFigure(ds_pristine, ds, senses, channel):
         backproj = ds.mapReverse(sens)
         # go with abs(), as negative sensitivities are as important
         # as positive ones...
-        # XXX
-        # YOH: we can do that only after we avg across splits
-        # backproj = Absolute(backproj)
-
-        avgbackproj = backproj.sum(axis=0)
+        # we can do that only after we avg across splits
+        avgbackproj = backproj.mean(axis=0)
 
         # compute per channel scores and average across folds
         # (yields (nchannels, )
@@ -236,7 +197,6 @@ def finalFigure(ds_pristine, ds, senses, channel):
     # Expand things a bit
     fig.subplots_adjust(left=0.06, right=1.05, bottom=0.01, wspace=-0.2)
     P.show()
-
 
 
 if __name__ == '__main__':
@@ -282,48 +242,16 @@ if __name__ == '__main__':
 
     do_analyses = True
     if do_analyses == True:
-        # eats all sensitivities
-        senses = []
-
-        # splitter to use for all analyses
-        splttr = NFoldSplitter()
-
         # some classifiers to test
         clfs = {
-            # explicitly instruct SMLR just to fit a single set of weights for our binary task
+            # explicitly instruct SMLR just to fit a single set of weights for our
+            # binary task
             'SMLR': SMLR(lm=0.1, fit_all_weights=False),
             'lCSVM': LinearCSVMC(),
             # 'sglCSVM': sg.SVM(), # lets see if we observe the same flip effect
             'lGPR': GPR(kernel=KernelLinear()),
             }
 
-        # run classifiers in cross-validation
-        for label, clf in clfs.iteritems():
-            cv = \
-              CrossValidatedTransferError(
-                TransferError(clf),
-                splttr,
-                harvest_attribs=\
-                  ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None)()'],
-                enable_states=['confusion', 'training_confusion'])
-            # we might need to device some 'CommonSide' transformer so all
-            # sensitivities point to the 'approx' the same side. Now we have them flipped -- SVM vs GPR/SMLR
-
-            verbose(1, 'Doing cross-validation with ' + label)
-            # run cross-validation
-            merror = cv(ds)
-            verbose(1, 'Accumulated confusion matrix for out-of-sample tests')
-            print cv.confusion
-
-            # get harvested sensitivities for all splits
-            sensitivities = N.array(cv.harvested.values()[0])
-            # and store
-            senses.append(
-                (label + ' (%.1f%% corr.) weights' \
-                    % cv.confusion.stats['ACC%'],
-                 sensitivities))
-
-        verbose(1, 'Computing additional sensitvities')
         # define some pure sensitivities (or related measures)
         sensanas={
                   'ANOVA': OneWayAnova(),
@@ -331,21 +259,11 @@ if __name__ == '__main__':
                   #'GPR_Model': GPRWeights(GPR(kernel=KernelLinear()), combiner=None),
                   #
                   # no I-RELIEF for now -- takes too long
-                  #'I-RELIEF': IterativeReliefOnline(),
+                  'I-RELIEF': IterativeReliefOnline(),
                   # gimme more !!
                  }
-
-        # wrapper everything into SplitFeaturewiseMeasure
-        # to get sense of variance across our artificial splits
-        # compute additional sensitivities
-        for k, v in sensanas.iteritems():
-            verbose(2, 'Computing: ' + k)
-            sa = SplitFeaturewiseMeasure(v, splttr,
-                                         enable_states=['maps'])
-            # compute sensitivities
-            sa(ds)
-            # and grab them for all splits
-            senses.append((k, sa.maps))
+        # perform the analysis and get all sensitivities
+        senses = doSensitivityAnalysis(ds, clfs, sensanas, NFoldSplitter())
 
         # save countless hours of time ;-)
         picklefile = open(os.path.join(datapath, subj + '_pickled.dat'), 'w')
