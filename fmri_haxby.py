@@ -321,6 +321,8 @@ def loadData(subj):
     # FOR YOUR EYES ONLY
     # classes illegally chosen from this confusion matrix
     #
+    # (not yet, still computing ;-), for now just first 4
+    #
     # DESTROY AFTER READING ;-)
 
     # only faces, houses, shoes, cats
