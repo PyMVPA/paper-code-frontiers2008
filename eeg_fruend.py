@@ -162,11 +162,8 @@ def finalFigure(ds_pristine, ds, senses, channel):
         backproj = ds.mapReverse(sens)
         # go with abs(), as negative sensitivities are as important
         # as positive ones...
-        # XXX
-        # YOH: we can do that only after we avg across splits
-        # backproj = Absolute(backproj)
-
-        avgbackproj = backproj.sum(axis=0)
+        # we can do that only after we avg across splits
+        avgbackproj = backproj.mean(axis=0)
 
         # compute per channel scores and average across folds
         # (yields (nchannels, )
