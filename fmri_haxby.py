@@ -321,7 +321,27 @@ def loadData(subj):
     # FOR YOUR EYES ONLY
     # classes illegally chosen from this confusion matrix
     #
-    # (not yet, still computing ;-), for now just first 4
+    # Computed using SMLR(lm=0.1) on full dataset
+    #
+    # predictions\targets  1.0    2.0    3.0    4.0    5.0    6.0    7.0    8.0
+    #             `------ -----  -----  -----  -----  -----  -----  -----  -----
+    #         1.0          103     0      3     12      0      0      4      1
+    #         2.0           0     106     0      2      0      6      0      5
+    #         3.0           0      1     60      3     18      2     25     12
+    #         4.0           2      0      5     73      7      0      4      3
+    #         5.0           0      0     19      8     49      6     17     24
+    #         6.0           0      0      1      1      5     89      3      0
+    #         7.0           3      0      8      5     17      5     42     22
+    #         8.0           0      1     12      4     12      0     13     41
+    #     Per target:     -----  -----  -----  -----  -----  -----  -----  -----
+    #          P           108    108    108    108    108    108    108    108
+    #          N           756    756    756    756    756    756    756    756
+    #          TP          103    106    60     73     49     89     42     41
+    #          TN          460    457    503    490    514    474    521    522
+    #       SUMMARY:      -----  -----  -----  -----  -----  -----  -----  -----
+    #         ACC         0.65
+    #         ACC%        65.16
+    #      # of sets       12
     #
     # DESTROY AFTER READING ;-)
 
