@@ -327,6 +327,9 @@ if __name__ == '__main__':
         # define some pure sensitivities (or related measures)
         sensanas={
                   'ANOVA': OneWayAnova(),
+                  # Crashes for Yarik -- I guess openopt issue
+                  #'GPR_Model': GPRWeights(GPR(kernel=KernelLinear()), combiner=None),
+                  #
                   # no I-RELIEF for now -- takes too long
                   #'I-RELIEF': IterativeReliefOnline(),
                   # gimme more !!
