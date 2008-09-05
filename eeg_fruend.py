@@ -293,7 +293,7 @@ if __name__ == '__main__':
             # explicitly instruct SMLR just to fit a single set of weights for our binary task
             'SMLR': SMLR(lm=0.1, fit_all_weights=False),
             'lCSVM': LinearCSVMC(),
-            'sglCSVM': sg.SVM(), # lets see if we observe the same flip effect
+            # 'sglCSVM': sg.SVM(), # lets see if we observe the same flip effect
             'lGPR': GPR(kernel=KernelLinear()),
             }
 
