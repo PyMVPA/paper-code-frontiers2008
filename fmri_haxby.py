@@ -386,6 +386,34 @@ def doClusterAnalysis(ds, senses, roi_mask, roilab):
             P.title(sid + ' -- ' + roi)
 
 
+def plotNonZeroSensitivityDistribution(sens, bins=10):
+    ns = []
+    for s in sens.T:
+        n, bin = P.mlab.hist(s[s.nonzero()], bins)
+        ns.append(n)
+        if not isSequenceType(bins):
+            bins = bin
+
+    colors = ['blue', 'red', 'green', 'cyan']
+    for i, n in enumerate(ns):
+        plotBars(n, yerr=None, offset=0.2*(i+1), width=0.2, color=colors[i])
+    loc, labels = P.xticks()
+    P.xticks(loc, ['' for b in bins])
+
+
+def plotBestPerClassSensitivities(sens, n):
+    # determine the n 'best' features for each class
+    el = FixedNElementTailSelector(n, mode='select', tail='upper')
+    best = []
+    for s in sens.T:
+        best += el(s).tolist()
+    best = N.unique(best)
+
+    colors = ['blue', 'red', 'green', 'cyan']
+    for i in range(sens.shape[1]):
+        plotBars(sens[best, i], yerr=None, offset=0.2*(i+1), width=0.2,
+                 color=colors[i])
+
 
 def loadData(subj):
     verbose(1, "Loading fMRI data from basepath %s" % datapath)
@@ -475,6 +503,7 @@ if __name__ == '__main__':
         senses = cPickle.load(picklefile)
         picklefile.close()
 
+    #doClusterAnalysis(ds, senses, roi_mask, roilab)
 
     # Now take sensitivities and split them into meaningful ROIs. For subj1 this
     # could be: Name (HarvardOxford-Code):
@@ -490,5 +519,43 @@ if __name__ == '__main__':
 
     roi_mask = ds.mapForward(roi_mask_nim.data)
 
+    # SMLR sensitivity analyzer that fits a weight per feature for each class
+    sa = SMLR(lm=0.01,
+              fit_all_weights=True).getSensitivityAnalyzer(combiner=N.array)
 
+    # run ROI analysis
+    # when running full brain picked voxels are clustered but quite distributed
+    # left TOFC seems to be good candidate with sensitivities for all 4 classes
+    roi_ds = ds.selectFeatures((roi_mask == roilab['TOFC']).nonzero()[0])
+
+    # get sensitivities for a fit using the whole dataset this time
+    # (nfeatures x ncategories)
+    sens = sa(roi_ds)
+
+    # store full sensitivities
+    #roi_ds.map2Nifti(sens.T).save('smlr_tofc_sens.nii.gz')
+    roi_ds.map2Nifti(sens.T).save('smlr_loc_sens.nii.gz')
+
+    # now limit to sensitivities in ROI
+    #sens[roi_mask != roilab['TOFC']] = 0
+    #sens[roi_mask != roilab['LOC']] = 0
+
+    plotNonZeroSensitivityDistribution(sens, 20)
+    plotBestPerClassSensitivities(sens, 10)
+
+    senses = doSensitivityAnalysis(roi_ds, {'SMLR(0.01)': SMLR(lm=0.01)},
+                                   {}, NFoldSplitter())
+
+    # generate map from num labels to literal labels
+    lmap = dict([(v, k) for k,v in ds.labels_map.iteritems()])
+
+    # for all class combinations
+    combinations = getUniqueLengthNCombinations(roi_ds.uniquelabels, 2)
+    max_sens = Absolute(sens).max()
+    for i, (k, l) in enumerate(combinations):
+        P.subplot(2, 3, i+1)
+        P.plot(sens[:,k-1], sens[:,l-1], '+')
+        P.xlim((-max_sens, max_sens))
+        P.ylim((-max_sens, max_sens))
+        P.title(lmap[k] + ' vs. ' + lmap[l])
 
