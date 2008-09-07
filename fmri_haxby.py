@@ -15,6 +15,7 @@ from mvpa.suite import *
 from warehouse import doSensitivityAnalysis
 # do manually until Yarik commits his storage class
 import cPickle
+import hcluster as clust
 
 # report everything
 verbose.level = 100
@@ -306,13 +307,95 @@ def mkdir(filename):
         except:
             verbose(2, "Failed to create directory %s. Trying to proceed" % filename)
 
+
+def plotROISensitivity(senses, roi_mask, roilab):
+    ids = []
+    colors = ['0.2', '0.6']
+    for i, (sid, sens) in enumerate(senses):
+        sens = L2Normed(N.array(sens))
+        ids.append(sid)
+        plotBars((sens[:,roi_mask == roilab['LOC']],
+                  sens[:, roi_mask == roilab['TOFC']]),
+                  labels=['LOC', 'TOFC'],
+                  width=0.2, offset=0.2 * (i+1), color=colors[i])
+    P.legend(ids)
+
+
+
+def plotSampleDistanceDendrogram(ds):
+    # generate map from num labels to literal labels
+    lmap = dict([(v, k) for k,v in ds.labels_map.iteritems()])
+
+    # compute distance matrix
+    dist = clust.pdist(ds.samples)
+
+    # determine clusters
+    link = clust.linkage(dist, 'complete')
+
+    # plot dendrogram with literal labels on leaves
+    # this does not work with etch's version of matplotlib
+    clust.dendrogram(link, colorthreshold=0,
+                     labels=[lmap[l] for l in ds.labels])
+
+
+
+def doClusterAnalysis(ds, senses, roi_mask, roilab):
+    ids = []
+    plots = 1
+    nrows = len(senses)
+    ncols = len(roilab) + 1
+
+    # selector to get the lowest 50%
+    fts = FractionTailSelector(0.5, mode='select', tail='lower')
+
+    # for all ROIs
+    for roi, roi_id in roilab.iteritems():
+        # first plot for full ROI
+        full_roi_ds = ds.selectFeatures((roi_mask == roi_id).nonzero()[0])
+        # do block-averaging to bring the number of samples down
+        m = SampleGroupMapper(fx=FirstAxisMean)
+        full_roi_ds = full_roi_ds.applyMapper(samplesmapper=m)
+
+        P.subplot(nrows, ncols, plots)
+        plotSampleDistanceDendrogram(full_roi_ds)
+        P.title('full ' + roi)
+        plots += 1
+
+
+        for i, (sid, sens) in enumerate(senses):
+            # first average over splits
+            sens = N.mean(sens, axis=0)
+
+            # mask sensitivities with ROI
+            roi_sens = sens * (roi_mask == roi_id)
+            roi_sens[fts(Absolute(sens))] = 0
+
+            # get new dataset only with features in ROI and non-zero
+            # sensitivity
+            roi_ds = ds.selectFeatures(roi_sens.nonzero()[0])
+
+            # do block-averaging to bring the number of samples down
+            m = SampleGroupMapper(fx=FirstAxisMean)
+            roi_ds = roi_ds.applyMapper(samplesmapper=m)
+
+            P.subplot(nrows, ncols, plots)
+            plots += 1
+
+            plotSampleDistanceDendrogram(roi_ds)
+
+            P.title(sid + ' -- ' + roi)
+
+
+
 def loadData(subj):
     verbose(1, "Loading fMRI data from basepath %s" % datapath)
 
-    attr = SampleAttributes(os.path.join(datapath, subj, 'numlabels.txt'))
+    attr = SampleAttributes(os.path.join(datapath, subj, 'labels.txt'),
+                            literallabels=True)
     dataset = \
       NiftiDataset(samples=os.path.join(datapath, subj, 'bold_detrend.nii.gz'),
                    labels=attr.labels,
+                   labels_map=True,
                    chunks=attr.chunks,
                    mask=os.path.join(datapath, subj,
                                      'bold_example_brain_mask.nii.gz'))
@@ -363,7 +446,7 @@ if __name__ == '__main__':
 
     verbose(1, 'Dataset after preprocessing:\n%s' % ds.summary())
 
-    do_analyses = True
+    do_analyses = False
     if do_analyses == True:
         # some classifiers to test
         clfs = {
@@ -391,3 +474,21 @@ if __name__ == '__main__':
         picklefile = open(os.path.join(datapath, subj + '_4cat_pickled.dat'))
         senses = cPickle.load(picklefile)
         picklefile.close()
+
+
+    # Now take sensitivities and split them into meaningful ROIs. For subj1 this
+    # could be: Name (HarvardOxford-Code):
+    #  1.   Lateral Occipital Cortex, inferior division (23)
+    #  2.   Temporal Occipital Fusiform Cortex (39)
+    # both ROIs determined by binarized probabilistic map. Overlapping voxels
+    # (with non-zero probabilities for both structures) are exclusively
+    # associated with one or the other ROI by choosing the one with the higher
+    # probability.
+    roilab = {'LOC': 1, 'TOFC': 2}
+    roi_mask_nim = NiftiImage(os.path.join(datapath, subj,
+                                           'HarvardOxford_loc1_tofc2.nii.gz'))
+
+    roi_mask = ds.mapForward(roi_mask_nim.data)
+
+
+
