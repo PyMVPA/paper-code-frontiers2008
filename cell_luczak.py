@@ -23,8 +23,14 @@ if not locals().has_key('__IP'):
                         default=False,
                         help="Either to process LFP instead of spike counts")
 
+    opt.do_sweep = \
+                 Option("--sweep",
+                        action="store_true", dest="do_sweep",
+                        default=False,
+                        help="Either to only sweep through various classifiers")
+
     opt.verbose.default=2                    # for now
-    parser.add_options([opt.zscore, opt.do_lfp])
+    parser.add_options([opt.zscore, opt.do_lfp, opt.do_sweep])
     parser.option_groups = [opts.common, opts.wavelet]
     (options, files) = parser.parse_args()
 else:
@@ -34,6 +40,8 @@ else:
     options.wavelet_decomposition = 'dwt'
     options.zscore = False
     options.do_lfp = False
+    options.do_sweep = False
+
 verbose.level = 4
 
 datapath = os.path.join(cfg.get('paths', 'data root', default='../data'),
@@ -43,80 +51,151 @@ verbose(1, 'Datapath is %s' % datapath)
 # Code our poor labels
 
 def loadData():
+    # Both lfp and spike counts share the same labels which are
+    # stored only in counts datafile. So we need to load both
     filepath = datapath + 'AL22_psth400.mat'
     verbose(1, "Loading Spike counts data from %s" % filepath)
     cell_mat = loadmat(filepath)
     samples =  cell_mat['tc_spk']
     labels = cell_mat['tc_stim']
 
-    filepath = datapath + 'tc_eeg_AL22.mat'
-    verbose(1, "Loading LFP data from %s" % filepath)
-    lfp_mat = loadmat(filepath)
-    tc_eeg = lfp_mat['tc_eeg']
+    if options.do_lfp:
+        filepath = datapath + 'tc_eeg_AL22.mat'
+        verbose(1, "Loading LFP data from %s" % filepath)
+        lfp_mat = loadmat(filepath)
+        tc_eeg = lfp_mat['tc_eeg']
+        samples = tc_eeg
 
-    d = MaskedDataset(samples=samples, labels=labels)
-    d_lfp = MaskedDataset(samples=tc_eeg, labels=labels)
+    d = MaskedDataset(samples=samples, labels=labels,
+                      labels_map=dict(
+        [(i+38, 'tone%d' % (i+1)) for i in xrange(43-38)] +
+        [(i+43, 'song%d' % (i+1)) for i in xrange(48-43)]))
+
+
     coarsenChunks(d, nchunks=4)         # lets split into 4 chunks
-    coarsenChunks(d_lfp, nchunks=4)
-    return d, d_lfp
+
+    return d
+
+
+def preprocess(ds):
+    # TODO we need to make EEPBin available from the EEPDataset
+    # DONE some basic assignment of attributes to dsattr
+
+    # XXX: many things look ugly... we need cleaner interface at few
+    # places I guess
+
+    if options.wavelet_family not in ['-1', None]:
+        verbose(2, "Converting into wavelets family %s."
+                % options.wavelet_family)
+        ebdata = ds.mapper.reverse(ds.samples)
+        kwargs = {'dim': 1, 'wavelet': options.wavelet_family}
+        if options.wavelet_decomposition == 'dwt':
+            verbose(3, "Doing DWT")
+            WT = WaveletTransformationMapper(**kwargs)
+        else:
+            verbose(3, "Doing DWP")
+            WT = WaveletPacketMapper(**kwargs)
+        ds_orig = ds
+        ebdata_wt = WT(ebdata)
+        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
+
+    if options.zscore:
+        verbose(2, "Z-scoring full dataset")
+        # every sample here is independent and we chunked only to reduce the computation time.
+        # there is close to none effect from removing just 1 sample out if we did LOO, so,
+        # lets z-score full dataset entirely
+        zscore(ds, perchunk=False)
+
+    nf_orig = ds.nfeatures
+    ds = removeInvariantFeatures(ds)
+    verbose(2, "Removed invariant features. Got %d out of %d features"
+            % (ds.nfeatures, nf_orig))
+
+    return ds
 
 
 def clf_dummy(ds):
-    #
-    # Simple classification. Silly one for now
-    #
+    """Simple sweep over various classifiers with basic feature
+    selections to assess performance
+    """
+
     verbose(1, "Sweeping through classifiers with NFold splitter for generalization")
 
-    #dsc = removeInvariantFeatures(ds)
-    #verbose(2, "Removed invariant features. Got %d out of %d features" % (dsc.nfeatures, ds.nfeatures))
     dsc = ds
     best_ACC = 0
     best_MCC = -1
-    for clf_ in clfs['smlr', 'multiclass']:
-      #clfs['sg', 'svm', 'multiclass'] + clfs['gpr', 'multiclass'] + clfs['smlr', 'multiclass']:
-      for clf in [clf_]: #[ FeatureSelectionClassifier(
-                 #    clf_,
-                 #    SensitivityBasedFeatureSelection(
-                 #      OneWayAnova(),
-                 #      FractionTailSelector(0.010, mode='select', tail='upper')),
-                 #    descr="%s on 1%%(ANOVA)" % clf_.descr),
-                 #  FeatureSelectionClassifier(
-                 #    clf_,
-                 #    SensitivityBasedFeatureSelection(
-                 #      OneWayAnova(),
-                 #      FractionTailSelector(0.05, mode='select', tail='upper')),
-                 #    descr="%s on 5%%(ANOVA)" % clf_.descr),
-                 #  #FeatureSelectionClassifier(
-                 #  #  clf_,
-                 #  #  SensitivityBasedFeatureSelection(
-                 #  #    OneWayAnova(),
-                 #  #    FractionTailSelector(0.10, mode='select', tail='upper')),
-                 #  #  descr="%s on 10%%(ANOVA)" % clf_.descr),
-                 #  #clf_
-                 # ]:
+    for clf_ in clfs['multiclass']:
+      for clf in [ clf_,
+                   #FeatureSelectionClassifier(
+                   # clf_,
+                   # SensitivityBasedFeatureSelection(
+                   #   OneWayAnova(),
+                   #   FractionTailSelector(0.010, mode='select', tail='upper')),
+                   # descr="%s on 1%%(ANOVA)" % clf_.descr),
+                   FeatureSelectionClassifier(
+                    clf_,
+                    SensitivityBasedFeatureSelection(
+                      OneWayAnova(),
+                      FractionTailSelector(0.05, mode='select', tail='upper')),
+                    descr="%s on 5%%(ANOVA)" % clf_.descr),
+                 ]:
         cv = CrossValidatedTransferError(
             TransferError(clf),
             NFoldSplitter(),
-            harvest_attribs=\
-              ['transerror.clf.getSensitivityAnalyzer(force_training=False)()'],
             enable_states=['confusion', 'training_confusion'])
         verbose(2, "Classifier " + clf.descr, lf=False)
         error = cv(dsc)
         tstats = cv.training_confusion.stats
         stats = cv.confusion.stats
-        sensitivities = N.array(cv.harvested.values()[0])
 
         mMCC = N.mean(stats['MCC'])
         if stats['ACC'] > best_ACC:
             best_ACC = stats['ACC']
+            best_ACC_cm = cv.confusion
         if mMCC > best_MCC:
             best_MCC = mMCC
+            best_MCC_cm = cv.confusion
+
         verbose(3, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (tstats['ACC'], N.mean(tstats['MCC']),
-                 stats['ACC'], mMCC))
+                (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], mMCC))
+
         if verbose.level > 3:
             print str(cv.confusion)
+
     verbose(1, "Best results were ACC=%.2g MCC=%.2g" % (best_ACC, best_MCC))
+    verbose(2, "Confusion matrix for best result according to ACC:\n%s" % best_ACC_cm)
+    verbose(2, "Confusion matrix for best result according to MCC:\n%s" % best_MCC_cm)
+
+
+def analysis(ds):
+    """Simple sweep over various classifiers with basic feature
+    selections to assess performance
+    """
+
+    verbose(1, "Sweeping through classifiers with NFold splitter for generalization")
+
+    dsc = ds
+    best_ACC = 0
+    best_MCC = -1
+
+    clf = SMLR(descr='SMLR(defaults)')
+    cv = CrossValidatedTransferError(
+        TransferError(clf),
+        NFoldSplitter(),
+        harvest_attribs=\
+          ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None)()'],
+        enable_states=['confusion', 'training_confusion'])
+    verbose(2, "Classifier " + clf.descr, lf=False)
+    error = cv(dsc)
+    tstats = cv.training_confusion.stats
+    stats = cv.confusion.stats
+    sensitivities = N.array(cv.harvested.values()[0])
+
+    verbose(2, " Training finished. Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
+                (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], mMCC))
+
+    return clf, sensitivities
+
 
 def do_plots():
 
@@ -167,42 +246,17 @@ def do_plots():
     P.ylabel('Classes')
     P.title('Neuron #%d sensitivity' % strongest_neurons[0])
     P.colorbar(shrink=1.0)
-def main():
-    # TODO we need to make EEPBin available from the EEPDataset
-    # DONE some basic assignment of attributes to dsattr
-
-    # XXX: many things look ugly... we need cleaner interface at few
-    # places I guess
-    ds, ds_lfp = loadData()
-
-    if options.do_lfp:
-        verbose(1, "Working on LFP data instead of spike counts")
-        # lets work on LFPs
-        ds = ds_lfp
-
-    if options.wavelet_family is not None:
-        verbose(2, "Converting into wavelets family %s."
-                % options.wavelet_family)
-        ebdata = ds.mapper.reverse(ds.samples)
-        kwargs = {'dim': 1, 'wavelet': options.wavelet_family}
-        if options.wavelet_decomposition == 'dwt':
-            verbose(3, "Doing DWT")
-            WT = WaveletTransformationMapper(**kwargs)
-        else:
-            verbose(3, "Doing DWP")
-            WT = WaveletPacketMapper(**kwargs)
-        ds_orig = ds
-        ebdata_wt = WT(ebdata)
-        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
-
-    if options.zscore:
-        verbose(2, "Z-scoring full dataset")
-        zscore(ds, perchunk=True)
-
-    clf_dummy(ds)
 
 
 if __name__ == '__main__':
-    pass
-#    main()
+    ds = loadData()
+    verbose(1, "Dataset for processing summary:\n%s" % ds.summary())
+    ds = preprocess(ds)
+    if options.do_sweep:
+        # To check what we can possibly get with different classifiers
+        clf_dummy(ds)
+    else:
+        clf, senses = analysis(ds)
+        do_plots(senses)
+        pass
 
