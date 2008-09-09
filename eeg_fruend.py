@@ -71,7 +71,8 @@ def loadData(subj):
     verbose(1, 'Limit to binary problem: ' + mode)
     labels2binlabels(d, mode)
 
-    d = d.resample(sr=target_samplingrate)
+    # inplace resampling
+    d.resample(sr=target_samplingrate)
     verbose(2, 'Downsampled data to %.1f Hz' % d.samplingrate)
 
     return d
