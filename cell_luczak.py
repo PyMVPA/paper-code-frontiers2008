@@ -101,8 +101,9 @@ def preprocess(ds):
 
     if options.zscore:
         verbose(2, "Z-scoring full dataset")
-        # every sample here is independent and we chunked only to reduce the computation time.
-        # there is close to none effect from removing just 1 sample out if we did LOO, so,
+        # every sample here is independent and we chunked only to
+        # reduce the computation time.  there is close to none effect
+        # for ANOVA from removing just 1 sample out if we did LOO, so,
         # lets z-score full dataset entirely
         zscore(ds, perchunk=False)
 

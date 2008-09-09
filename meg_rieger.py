@@ -106,12 +106,15 @@ def loadData(subj):
 
     # If we decide to do searchlight, so we get 'generalization' per
     # each time point after onset, using all sensors
-    dataset.mapper.setMetric(
-        DescreteMetric(elementsize=[1, 100],
-                       # distance function should be some custom one
-                       # to don't count different time points at all
-                       distance_function=cartesianDistance))
-    
+    #
+    #  POSTPONED
+    #
+    # dataset.mapper.setMetric(
+    #     DescreteMetric(elementsize=[1, 100],
+    #                    # distance function should be some custom one
+    #                    # to don't count different time points at all
+    #                    distance_function=cartesianDistance))
+
     return dataset
 
 
@@ -140,116 +143,149 @@ if __name__ == '__main__':
     verbose(1, 'Precondition data')
     doZScore = True
     if doZScore == True:
-        zscore(ds, perchunk=True)
+        zscore(ds, perchunk=False)
     else:
         # Just divide by max value among first 33 sensors (34 and 91 seems to
         # be bad, thus we need to exclude them)
         ds.samples *= 1.0/N.max(N.abs(ds.O[:,:33,:]))
-
     print ds.summary()
-    # For now lets just cheat and do on the whole ds, although it
-    # doesnt bias selection much (if at all) if later on we just do
-    # LOO testing (instead of coarse chunks)
+
     doSelectNFeaturesAnova = False
     if doSelectNFeaturesAnova:
+        # For now lets just cheat and do on the whole ds, although it
+        # doesnt bias selection much (if at all) if later on we just do
+        # LOO testing (instead of coarse chunks)
         verbose(1, 'Cruel feature selection')
         ss = SensitivityBasedFeatureSelection(
             OneWayAnova(),
-            FractionTailSelector(0.20, mode='select', tail='upper')
-            #FixedNElementTailSelector(1, mode='select', tail='upper')
+            #FractionTailSelector(0.20, mode='select', tail='upper')
+            FixedNElementTailSelector(2, mode='select', tail='upper')
             )
         ds = ss(ds)[0]
         print ds.summary()
 
+    # Test few classifiers
     best = {}
     # libsvr never converges for some reason
     #for clf in clfs['linear', '!lars', '!blr', '!libsvr', '!meta']:#[:1]:#[::-1]:
     for clf in [sg.SVM(kernel_type='linear')]:
-        try:# since some evil nuSVMs might puke on infeasible default nu
-            # to get results from Figure2A
-            # C=-2.0 gives 84% when properly scaled and 5% ANOVA voxels
-            clf = sg.SVM(kernel_type='linear')
-            clf.C = -1.0
-            #for C in [-10, -6, -5, -4, -3, -2, -1, -0.5]:
-            #clf.C = C
-            print clf.C
-            spl = ds.samplesperlabel
-            ratio = N.sqrt(float(spl[0])/spl[1])
-            #C = clf.C                   # take scalar value
-            #clf.C = C
-            clf.C = (C/ratio, C*ratio)
+        # C=-2.0 gives 84% when properly scaled and 5% ANOVA voxels
+        # C=-1.0 and RFE gives up to 85% correct
+        # clf = sg.SVM(kernel_type='linear')
+        C = -2.0
 
-            rfesvm = sg.SVM(kernel_type='linear')
-            rfesvm.C = clf.C
+        # Scale C according  to the number of samples per class
+        spl = ds.samplesperlabel
+        ratio = N.sqrt(float(spl[0])/spl[1])
+        clf.C = (C/ratio, C*ratio)
 
-            # This classifier will do RFE while taking transfer error to testing
-            # set of that split. Resultant classifier is voted classifier on top
-            # of all splits, let see what that would do ;-)
-            clf = \
-              SplitClassifier(                      # which does splitting internally
-               FeatureSelectionClassifier(
-                clf = clf,
-                feature_selection = RFE(             # on features selected via RFE
-                    sensitivity_analyzer=\
-                        rfesvm.getSensitivityAnalyzer(transformer=Absolute),
-                    transfer_error=TransferError(rfesvm),
-                    stopping_criterion=FixedErrorThresholdStopCrit(0.05),
-                    feature_selector=FractionTailSelector(
-                                       0.2, mode='discard', tail='lower'),
-                                       # remove 20% of features at each step
-                    update_sensitivity=False)),
-                    # update sensitivity at each step
-                descr='LinSVM+RFE(N-Fold,static)')
+        #
+        # Two flavors of RFE:
+        #
+        # This classifier will do RFE while taking transfer error to testing
+        # set of that split. Resultant classifier is voted classifier on top
+        # of all splits, let see what that would do ;-)
+        #rfesvm = sg.SVM(kernel_type='linear')
+        #rfesvm.C = clf.C
+        #clf = \
+        #  SplitClassifier(                      # which does splitting internally
+        #   FeatureSelectionClassifier(
+        #    clf = clf,
+        #    feature_selection = RFE(             # on features selected via RFE
+        #        sensitivity_analyzer=\
+        #            rfesvm.getSensitivityAnalyzer(transformer=Absolute),
+        #        transfer_error=TransferError(rfesvm),
+        #        stopping_criterion=FixedErrorThresholdStopCrit(0.05),
+        #        feature_selector=FractionTailSelector(
+        #                           0.2, mode='discard', tail='lower'),
+        #                           # remove 20% of features at each step
+        #        update_sensitivity=True)),
+        #        # update sensitivity at each step
+        #    descr='LinSVM+RFE(N-Fold,static)')
 
-            #rfesvm_split = SplitClassifier(rfesvm)
-            #clf = FeatureSelectionClassifier(
-            #  clf = clf,
-            #  feature_selection = RFE(             # on features selected via RFE
-            #      # based on sensitivity of a clf which does splitting internally
-            #      sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
-            #          transformer=Absolute),
-            #      transfer_error=ConfusionBasedError(
-            #         rfesvm_split,
-            #         confusion_state="confusion"),
-            #         # and whose internal error we use
-            #      feature_selector=FractionTailSelector(
-            #                         0.2, mode='discard', tail='lower'),
-            #                         # remove 20% of features at each step
-            #      update_sensitivity=False),
-            #      # update sensitivity at each step
-            #  descr='LinSVM+RFE(splits_avg, static)' )
+        #fesvm_split = SplitClassifier(rfesvm)
+        #lf = FeatureSelectionClassifier(
+        # clf = clf,
+        # feature_selection = RFE(             # on features selected via RFE
+        #     # based on sensitivity of a clf which does splitting internally
+        #     sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
+        #         transformer=Absolute),
+        #     transfer_error=ConfusionBasedError(
+        #        rfesvm_split,
+        #        confusion_state="confusion"),
+        #        # and whose internal error we use
+        #     feature_selector=FractionTailSelector(
+        #                        0.2, mode='discard', tail='lower'),
+        #                        # remove 20% of features at each step
+        #     update_sensitivity=True),
+        #     # update sensitivity at each step
+        # descr='LinSVM+RFE(splits_avg, static)' )
 
+        cv2A = CrossValidatedTransferError(
+                  TransferError(clf),
+                  NFoldSplitter(),
+                  enable_states=['confusion', 'training_confusion', 'splits'])
 
+        verbose(1, "Running cross-validation on %s" % clf.descr)
+        error2A = cv2A(ds)
+        verbose(2, "Figure 2A LOO performance:\n%s" % cv2A.confusion)
+        if best.get('2A', (100, None, None))[0] > error2A:
+            best['2A'] = (error2A, cv2A.confusion, clf.descr)
 
-            cv2A = CrossValidatedTransferError(
-                      TransferError(clf),
-                      NFoldSplitter(),
-                      enable_states=['confusion', 'training_confusion'])
+        # assign original single C
+        clf.C = C
+        # to get results from Figure2B
+        cv2B = CrossValidatedTransferError(
+                  TransferError(clf),
+                  NFoldSplitter(nperlabel='equal',
+                                # increase to reasonable number
+                                nrunspersplit=4),
+                  enable_states=['confusion', 'training_confusion'])
 
-            verbose(1, "Running cross-validation on %s" % clf.descr)
-            error2A = cv2A(ds)
-            verbose(2, "Figure 2A LOO performance:\n%s" % cv2A.confusion)
-            if best.get('2A', (100, None, None))[0] > error2A:
-                best['2A'] = (error2A, cv2A.confusion, clf.descr)
+        error2B = cv2B(ds)
 
+        verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
+        if best.get('2B', (100, None, None))[0] > error2B:
+            best['2B'] = (error2B, cv2B.confusion, clf.descr)
 
-            clf.C = C
-            # to get results from Figure2B
-            cv2B = CrossValidatedTransferError(
-                      TransferError(clf),
-                      NFoldSplitter(nperlabel='equal',
-                                    # increase to reasonable number
-                                    nrunspersplit=4),
-                      enable_states=['confusion', 'training_confusion'])
-
-            error2B = cv2B(ds)
-            verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
-            if best.get('2B', (100, None, None))[0] > error2B:
-                best['2B'] = (error2B, cv2B.confusion, clf.descr)
-        except:
-            pass
 
     verbose(1, "Best result for 2A was %g achieved on %s, and for 2B " \
-               "was %g achieved using %s" %
+            "was %g achieved using %s" %
             (best['2A'][0], best['2A'][2],
              best['2B'][0], best['2B'][2]))
+
+
+def plot_ds_perchunk(ds, clf_labels=None):
+    """Quick plot to see chunk sctructure in dataset with 2 features
+
+    if clf_labels is provided for the predicted labels, then
+    incorrectly labeled samples will have 'x' in them
+    """
+    if ds.nfeatures != 2:
+        raise ValueError, "Can plot only in 2D, ie for datasets with 2 features"
+    if P.matplotlib.get_backend() == 'TkAgg':
+        P.ioff()
+    if clf_labels is not None and len(clf_labels) != ds.nsamples:
+        clf_labels = None
+    colors=('b', 'g', 'r', 'c', 'm', 'y', 'k', 'w')
+    labels = ds.uniquelabels
+    labels_map = dict(zip(labels, colors[:len(labels)]))
+    for chunk in ds.uniquechunks:
+        chunk_text = str(chunk)
+        ids = ds.where(chunks=chunk)
+        ds_chunk = ds[ids]
+        for i in xrange(ds_chunk.nsamples):
+            s = ds_chunk.samples[i]
+            l = ds_chunk.labels[i]
+            format = ''
+            if clf_labels != None:
+                if clf_labels[i] != ds_chunk.labels[i]:
+                    P.plot([s[0]], [s[1]], 'x' + labels_map[l])
+            P.text(s[0], s[1], chunk_text, color=labels_map[l],
+                   horizontalalignment='center',
+                   verticalalignment='center',
+                   )
+    dss = ds.samples
+    P.axis((1.1*N.min(dss[:,0]), 1.1*N.max(dss[:,1]), 1.1*N.max(dss[:,0]), 1.1*N.min(dss[:,1])))
+    P.draw()
+    P.ion()
