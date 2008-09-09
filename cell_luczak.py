@@ -125,19 +125,19 @@ def clf_dummy(ds):
     best_ACC = 0
     best_MCC = -1
     for clf_ in clfs['multiclass']:
-      for clf in [ clf_,
-                   #FeatureSelectionClassifier(
-                   # clf_,
-                   # SensitivityBasedFeatureSelection(
-                   #   OneWayAnova(),
-                   #   FractionTailSelector(0.010, mode='select', tail='upper')),
-                   # descr="%s on 1%%(ANOVA)" % clf_.descr),
+      for clf in [ FeatureSelectionClassifier(
+                    clf_,
+                    SensitivityBasedFeatureSelection(
+                      OneWayAnova(),
+                      FractionTailSelector(0.010, mode='select', tail='upper')),
+                    descr="%s on 1%%(ANOVA)" % clf_.descr),
                    FeatureSelectionClassifier(
                     clf_,
                     SensitivityBasedFeatureSelection(
                       OneWayAnova(),
                       FractionTailSelector(0.05, mode='select', tail='upper')),
                     descr="%s on 5%%(ANOVA)" % clf_.descr),
+                   clf_
                  ]:
         cv = CrossValidatedTransferError(
             TransferError(clf),
@@ -172,18 +172,19 @@ def analysis(ds):
     selections to assess performance
     """
 
-    verbose(1, "Sweeping through classifiers with NFold splitter for generalization")
+    verbose(1, "Running favorite classifier with NFold splitter for generalization testing")
 
     dsc = ds
     best_ACC = 0
     best_MCC = -1
 
     clf = SMLR(descr='SMLR(defaults)')
+
     cv = CrossValidatedTransferError(
         TransferError(clf),
         NFoldSplitter(),
         harvest_attribs=\
-          ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None)()'],
+          ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None, combiner=None)()'],
         enable_states=['confusion', 'training_confusion'])
     verbose(2, "Classifier " + clf.descr, lf=False)
     error = cv(dsc)
@@ -192,15 +193,15 @@ def analysis(ds):
     sensitivities = N.array(cv.harvested.values()[0])
 
     verbose(2, " Training finished. Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], mMCC))
+                (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], N.mean(stats['MCC'])))
 
-    return clf, sensitivities
+    return cv, sensitivities
 
 
-def do_plots():
-
-    sana = te.clf.getSensitivityAnalyzer(force_training=False, combiner=lambda x:x)
-    sens = sana()
+def do_plots(sensitivities):
+    # sana = te.clf.getSensitivityAnalyzer(force_training=False, combiner=lambda x:x)
+    # sens = sana()
+    sens = N.mean(sensitivities, axis=0)
     sensO = ds.mapReverse(sens.T)
     sensOn = L2Normed(sensO)
 
@@ -256,7 +257,7 @@ if __name__ == '__main__':
         # To check what we can possibly get with different classifiers
         clf_dummy(ds)
     else:
-        clf, senses = analysis(ds)
+        cv, senses = analysis(ds)
         do_plots(senses)
         pass
 
