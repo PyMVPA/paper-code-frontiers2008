@@ -33,7 +33,7 @@ conditions = {'false': 'cosu', 'unsure': 'fausu'}
 subj = 'vp02'
 # sampling rate after preprocessing in Hz
 target_samplingrate = 80
-
+post_duration = 0.6
 
 def loadData(subj):
     datasets = []
@@ -81,7 +81,7 @@ def loadData(subj):
     # deselect timespoints prior to onset
     mask[:, :int(N.round(-dataset.t0 * dataset.samplingrate))] = False
     # deselect timepoints after 600 ms after onset
-    mask[:, int(N.round((-dataset.t0 + 0.6) * dataset.samplingrate)):] = False
+    mask[:, int(N.round((-dataset.t0 + post_duration) * dataset.samplingrate)):] = False
     # finally transform into feature selection list
     mask = dataset.mapForward(mask).nonzero()[0]
     # and apply selection
@@ -148,7 +148,7 @@ def preprocess(ds):
         ds.samples *= 1.0/N.max(N.abs(ds.O[:,:33,:]))
     print ds.summary()
 
-    doSelectNFeaturesAnova = True
+    doSelectNFeaturesAnova = False
     if doSelectNFeaturesAnova:
         # For now lets just cheat and do on the whole ds, although it
         # doesnt bias selection much (if at all) if later on we just do
@@ -156,7 +156,7 @@ def preprocess(ds):
         verbose(1, 'Cruel feature selection')
         ss = SensitivityBasedFeatureSelection(
             OneWayAnova(),
-            FractionTailSelector(0.10, mode='select', tail='upper')
+            FractionTailSelector(0.01, mode='select', tail='upper')
             #FixedNElementTailSelector(2, mode='select', tail='upper')
             )
         ds = ss(ds)[0]
@@ -290,28 +290,30 @@ def analysis(ds):
 
     # Used in RFE implementations
     rfesvm = sg.SVM(kernel_type='linear')
+    rfesvm2 = sg.SVM(kernel_type='linear')
     rfesvm.C = clf.C
-    rfesvm_split = SplitClassifier(rfesvm)
+    rfesvm2.C = clf.C
+    rfesvm_split = SplitClassifier(rfesvm2)
     clfs = {
         # explicitly instruct SMLR just to fit a single set of weights for our
         # binary task
         'SMLR': SMLR(lm=0.1, fit_all_weights=False),
         'lCSVM': clf,
         'lGPR': GPR(kernel=KernelLinear()),
-        'lCSVM+RFE(farm)': SplitClassifier( # which does splitting internally
-           FeatureSelectionClassifier(
-            clf = clf,
-            feature_selection = RFE(             # on features selected via RFE
-                sensitivity_analyzer=\
-                    rfesvm.getSensitivityAnalyzer(transformer=Absolute),
-                transfer_error=TransferError(rfesvm),
-                stopping_criterion=FixedErrorThresholdStopCrit(0.05),
-                feature_selector=FractionTailSelector(
-                                   0.2, mode='discard', tail='lower'),
-                                   # remove 20% of features at each step
-                update_sensitivity=True)),
-                # update sensitivity at each step
-            descr='LinSVM+RFE(farm,N-Fold)'),
+        #'lCSVM+RFE(farm)': SplitClassifier( # which does splitting internally
+        #   FeatureSelectionClassifier(
+        #    clf = clf,
+        #    feature_selection = RFE(             # on features selected via RFE
+        #        sensitivity_analyzer=\
+        #            rfesvm.getSensitivityAnalyzer(transformer=Absolute),
+        #        transfer_error=TransferError(rfesvm),
+        #        stopping_criterion=FixedErrorThresholdStopCrit(0.05),
+        #        feature_selector=FractionTailSelector(
+        #                           0.2, mode='discard', tail='lower'),
+        #                           # remove 20% of features at each step
+        #        update_sensitivity=True)),
+        #        # update sensitivity at each step
+        #    descr='LinSVM+RFE(farm,N-Fold)'),
         'lCSVM+RFE(mean)': FeatureSelectionClassifier(
           clf = clf,
           feature_selection = RFE(             # on features selected via RFE
@@ -363,6 +365,92 @@ def analysis(ds):
 
 
 def finalFigure(ds_pristine, ds, senses, channel):
+    """Pretty much rip off the EEG script
+    """
+    SR = ds_pristine.samplingrate
+    # data is already trials, this would correspond sec before onset
+    pre = -(int(ds_pristine.t0*100)/100.0)   # round to 2 digits
+    # number of channels, samples per trial
+    nchannels, spt = ds_pristine.mapper.mask.shape
+    # compute seconds in trials after onset
+    post = post_duration
+
+    # index of the channel of interest
+    ch_of_interest = ds_pristine.channelids.index(channel)
+
+    # error type to use in all plots
+    errtype=['std', 'ci95']
+
+    fig = P.figure(facecolor='white', figsize=(12, 6))
+
+    # plot ERPs
+    ax = fig.add_subplot(2, 1, 1, frame_on=False)
+
+    plots = []
+    colors = ('r', 'b', '0')
+    responses = [ ds_pristine['labels', i].O[:, ch_of_interest, :] * 1e15
+                  for i in [0, 1] ]
+
+    # TODO: move inside dataset
+    labels_map_rev = dict([reversed(x) for x in ds.labels_map.iteritems()])
+
+    for l in ds_pristine.UL:
+        plots.append({'label': labels_map_rev[l].tostring(),
+                      'data' : responses[l], 'color': colors[l]})
+
+    plots.append({'label': 'dwave',
+                 'data':  N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
+                                  ndmin=2),
+                 'color': colors[2],
+                 'pre_mean': 0})
+
+    plotERPs( plots,
+              pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
+              ylabel='fT', ylformat='%.1f', xlabel=None, legend=True)
+
+    # plot sensitivities
+    ax = fig.add_subplot(2, 1, 2, frame_on=False)
+
+    sens_labels = []
+    erp_cfgs = []
+    colors = ['red', 'green', 'blue', 'cyan', 'magenta']
+
+    for i, (sens_id, sens) in enumerate(senses[::-1]):
+        sens_labels.append(sens_id)
+        # back-project
+        backproj = ds.mapReverse(sens)
+
+        # and normalize so that all non-zero weights sum up to 1
+        # ATTN: need to norm sensitivities for each fold on their own --
+        # who knows what's happening otherwise
+        for f in xrange(backproj.shape[0]):
+            backproj[f] = L2Normed(backproj[f])
+
+        # take one channel: yields (nfolds x ntimepoints)
+        ch_sens = backproj[:, ch_of_interest, :]
+
+        # sign of sensitivities is more or less arbitrary, but when flipped
+        # to have to big bump in the middle on the positive side, they all
+        # really look like the diff wave -- maybe need some better
+        # justification ;-)
+        if ch_sens.mean() < 0:
+            ch_sens *= -1
+
+        # charge ERP definition
+        erp_cfgs.append(
+            {'label': sens_id,
+             'color': colors[i],
+             'data' : ch_sens})
+
+    # just ci95 error here, due to the low number of folds not much different
+    # from std; also do _not_ demean based on initial baseline as we want the
+    # untransformed sensitivities
+    plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype='ci95',
+             ylabel=None, ylformat='%.2f', pre_mean=0)
+
+    P.legend(sens_labels)
+
+
     return fig
 
 if __name__ == '__main__':
@@ -376,8 +464,10 @@ if __name__ == '__main__':
         clfSweep(ds)
     else:
         senses = analysis(ds)
-        finalFigure(ds_pristine, ds, senses, 0)
-
+        for sens in ds_pristine.channelids:
+            fig = finalFigure(ds_pristine, ds, senses, sens)
+            fig.savefig('/tmp/meg_rieger-fig1-%s.png' % sens, dpi=80)
+            P.close(fig)
 
 
 
