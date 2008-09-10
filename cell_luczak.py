@@ -66,10 +66,12 @@ def loadData():
         tc_eeg = lfp_mat['tc_eeg']
         samples = tc_eeg
 
-    d = MaskedDataset(samples=samples, labels=labels,
-                      labels_map=dict(
-        [(i+38, 'tone%d' % (i+1)) for i in xrange(43-38)] +
-        [(i+43, 'song%d' % (i+1)) for i in xrange(48-43)]))
+    d = MaskedDataset(samples=samples, labels=labels)
+    # assign descriptions (mapping) of the numerical labels
+    tones = (3, 7, 12, 20, 30)
+    d.labels_map = dict(
+        [('%dkHz' % (tones[i]), i+38) for i in xrange(43-38)] +
+        [('song%d' % (i+1), i+43) for i in xrange(48-43)])
 
 
     coarsenChunks(d, nchunks=4)         # lets split into 4 chunks
@@ -157,7 +159,7 @@ def clf_dummy(ds):
             best_MCC = mMCC
             best_MCC_cm = cv.confusion
 
-        verbose(3, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
+        verbose(2, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
                 (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], mMCC))
 
         if verbose.level > 3:
