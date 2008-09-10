@@ -121,7 +121,7 @@ def preprocess(ds):
     return ds
 
 
-def clf_dummy(ds):
+def clfSweep(ds):
     """Simple sweep over various classifiers with basic feature
     selections to assess performance
     """
@@ -204,6 +204,7 @@ def analysis(ds):
 
     return cv, sensitivities
 
+
 def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
     """
     Tried to make use of alpha to make low values invisible. Can plot,
@@ -241,18 +242,34 @@ def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
 
     P.yticks(())
     dx = ax.axis()[1]/80
+
+    labels_map_rev = dict([reversed(x) for x in ds.labels_map.iteritems()])
     for i,l in enumerate(ds.UL):
-        ax.text(-dx, (len(ds.UL)-i)-0.5, ds.labels_map[l],
+        ax.text(-dx, (len(ds.UL)-i)-0.5, labels_map_rev[l],
                horizontalalignment='right',
                verticalalignment='center')
     cb = P.colorbar(ret, shrink=0.9)
     return ret, cb
 
 
-def do_plots(sensitivities):
-    # sana = te.clf.getSensitivityAnalyzer(force_training=False, combiner=lambda x:x)
-    # sens = sana()
+def inverse_cmap(cmap_name):
+    """Create a new colormap from the named colormap, where it got reversed"""
+    import matplotlib._cm as _cm
+    import matplotlib as mpl
+    try:
+        cmap_data = eval('_cm._%s_data' % cmap_name)
+    except:
+        raise ValueError, "Cannot obtain data for the colormap %s" % cmap_name
+    new_data = dict( [(k, [(v[i][0], v[-(i+1)][1], v[-(i+1)][2])
+                           for i in xrange(len(v))])
+                      for k,v in cmap_data.iteritems()] )
+    return mpl.colors.LinearSegmentedColormap('%s_rev' % cmap_name, new_data, _cm.LUTSIZE)
 
+
+RdBu_rev = inverse_cmap('RdBu')
+
+
+def finalFigure(sensitivities):
     # pre-process sensitivities slightly
     # which we should have actually done in transformers
 
@@ -332,7 +349,7 @@ def do_plots(sensitivities):
     ax = fig.add_subplot(nsy, nsx, 4);
     # TODO: proper labels on y-axis
     vmax = N.max(N.abs(sensOn_perneuron1))
-    imshow_alphad(sensOn_perneuron1, ax=ax, cmap=P.cm.RdBu, #cmap = P.cm.YlOrRd,
+    imshow_alphad(sensOn_perneuron1, ax=ax, cmap=RdBu_rev, #cmap = P.cm.YlOrRd,
                   aspect=c_n_aspect, vmin=-vmax, vmax=vmax, **ckwargs);
     P.xlabel('Neuron')
     #P.ylabel('Class')
@@ -353,7 +370,7 @@ def do_plots(sensitivities):
     # Lets plot sensitivities in time bins per each class for the 'strongest'
     sens_neuron = sensOn[:, :, strongest_neuron]
     mmax = N.max(N.abs(sens_neuron))
-    im, cb = imshow_alphad(sens_neuron, ax=ax, cmap=P.cm.RdBu,
+    im, cb = imshow_alphad(sens_neuron, ax=ax, cmap=RdBu_rev,
                   aspect=c_tb_aspect, vmin=-mmax, vmax=mmax, **ckwargs)
     P.xlabel('Time(ms)')
     #P.ylabel('Classes')
@@ -369,9 +386,10 @@ if __name__ == '__main__':
     ds = preprocess(ds)
     if options.do_sweep:
         # To check what we can possibly get with different classifiers
-        clf_dummy(ds)
+        clfSweep(ds)
     else:
         cv, senses = analysis(ds)
-        do_plots(senses)
+        finalFigure(senses)
         pass
+
 
