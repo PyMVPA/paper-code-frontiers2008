@@ -30,6 +30,16 @@ verbose(1, 'Datapath is %s' % datapath)
 
 subj = 'subj1'
 
+
+# read HarvardOxford-Cortical atlas index map
+import xml.dom.minidom as md
+atlas = md.parse('/usr/share/fsl/data/atlases/HarvardOxford-Cortical.xml')
+# and convert into dict (index is shifted by one in volume, correcting here)
+atlas = dict([(int(el.getAttribute('index')) + 1,
+               el.firstChild.data)
+                    for el in atlas.getElementsByTagName('label')])
+
+
 # if we are to change backend to something which doesn't need DISPLAY
 #import matplotlib
 #matplotlib.use('pdf')
@@ -423,7 +433,9 @@ def loadData(subj):
     dataset = \
       NiftiDataset(samples=os.path.join(datapath, subj, 'bold_detrend.nii.gz'),
                    labels=attr.labels,
-                   labels_map=True,
+                   labels_map={'rest': 0, 'face': 1, 'house': 2, 'shoe': 3,
+                               'cat': 4, 'scissors': 5, 'scrambledpix': 6,
+                               'bottle': 7, 'chair': 8},
                    chunks=attr.chunks,
                    mask=os.path.join(datapath, subj,
                                      'bold_example_brain_mask.nii.gz'))
@@ -474,21 +486,17 @@ if __name__ == '__main__':
 
     verbose(1, 'Dataset after preprocessing:\n%s' % ds.summary())
 
-    do_analyses = False
+    do_analyses = True
     if do_analyses == True:
         # some classifiers to test
         clfs = {
-            'SMLR': SMLR(lm=0.1)
-#            'lCSVM': LinearCSVMC(),
-            # 'sglCSVM': sg.SVM(), # lets see if we observe the same flip effect
-#            'lGPR': GPR(kernel=KernelLinear()),
+            'SMLR': SMLR(lm=0.1),
             }
 
         # define some pure sensitivities (or related measures)
         sensanas={
                   'ANOVA': OneWayAnova(),
-                  # no I-RELIEF for now -- takes too long
-#                  'I-RELIEF': IterativeReliefOnline(),
+                  'I-RELIEF': IterativeReliefOnline(),
                   # gimme more !!
                  }
         # perform the analysis and get all sensitivities
@@ -505,57 +513,99 @@ if __name__ == '__main__':
 
     #doClusterAnalysis(ds, senses, roi_mask, roilab)
 
-    # Now take sensitivities and split them into meaningful ROIs. For subj1 this
-    # could be: Name (HarvardOxford-Code):
-    #  1.   Lateral Occipital Cortex, inferior division (23)
-    #  2.   Temporal Occipital Fusiform Cortex (39)
-    # both ROIs determined by binarized probabilistic map. Overlapping voxels
-    # (with non-zero probabilities for both structures) are exclusively
-    # associated with one or the other ROI by choosing the one with the higher
-    # probability.
-    roilab = {'LOC': 1, 'TOFC': 2}
-    roi_mask_nim = NiftiImage(os.path.join(datapath, subj,
-                                           'HarvardOxford_loc1_tofc2.nii.gz'))
-
-    roi_mask = ds.mapForward(roi_mask_nim.data)
-
-    # SMLR sensitivity analyzer that fits a weight per feature for each class
-    sa = SMLR(lm=0.01,
-              fit_all_weights=True).getSensitivityAnalyzer(combiner=N.array)
-
-    # run ROI analysis
-    # when running full brain picked voxels are clustered but quite distributed
-    # left TOFC seems to be good candidate with sensitivities for all 4 classes
-    roi_ds = ds.selectFeatures((roi_mask == roilab['TOFC']).nonzero()[0])
-
-    # get sensitivities for a fit using the whole dataset this time
-    # (nfeatures x ncategories)
-    sens = sa(roi_ds)
-
-    # store full sensitivities
-    #roi_ds.map2Nifti(sens.T).save('smlr_tofc_sens.nii.gz')
-    roi_ds.map2Nifti(sens.T).save('smlr_loc_sens.nii.gz')
-
-    # now limit to sensitivities in ROI
-    #sens[roi_mask != roilab['TOFC']] = 0
-    #sens[roi_mask != roilab['LOC']] = 0
-
-    plotNonZeroSensitivityDistribution(sens, 20)
-    plotBestPerClassSensitivities(sens, 10)
-
-    senses = doSensitivityAnalysis(roi_ds, {'SMLR(0.01)': SMLR(lm=0.01)},
-                                   {}, NFoldSplitter())
-
-    # generate map from num labels to literal labels
-    lmap = dict([(v, k) for k,v in ds.labels_map.iteritems()])
-
-    # for all class combinations
-    combinations = getUniqueLengthNCombinations(roi_ds.uniquelabels, 2)
-    max_sens = Absolute(sens).max()
-    for i, (k, l) in enumerate(combinations):
-        P.subplot(2, 3, i+1)
-        P.plot(sens[:,k-1], sens[:,l-1], '+')
-        P.xlim((-max_sens, max_sens))
-        P.ylim((-max_sens, max_sens))
-        P.title(lmap[k] + ' vs. ' + lmap[l])
-
+#    atlas_nim = \
+#        NiftiImage(os.path.join(datapath, subj,
+#                                'HarvardOxford-cort-maxprob-thr25_bold.nii.gz'))
+#
+#    atlas_mask = ds.mapForward(roi_mask_nim.data)
+#
+#    sens_scores = {}
+#    # for all available sensitivities
+#    for sid, sens in senses:
+#        sens = N.array(sens)
+#        # normalize sensitivities per split/fold
+#        for i, s in enumerate(sens):
+#            sens[i] = L1Normed(s)
+#        # generate score dict with atlas ROI names as keys
+#        scores = [(name, N.sum(Absolute(sens[:, atlas_mask == index]), axis=1))
+#                    for index, name in atlas.iteritems()]
+#        sens_scores[sid] = scores
+#
+#    colors = ['red', 'blue', 'green', 'cyan', 'magenta']
+#    sids = []
+#    rois = None
+#    for i, (sid, scores) in enumerate(sens_scores.iteritems()):
+#        print sid
+#        # store ROI names if necessary
+#        if rois is None:
+#            rois = [s[0] for s in scores]
+#        plotBars([s[1] for s in scores], width=0.2, offset=0.2 * (i + 1),
+#                 color=colors[i])
+#        sids.append(sid)
+#    P.legend(sids)
+#    P.xticks(N.arange(len(atlas)) + 0.3, rois)
+#    labels = P.gca().get_xticklabels()
+#    # rotate labels
+#    P.setp(labels, rotation=90)
+#
+#    # run ROI analysis
+#    # when running full brain picked voxels are clustered but quite distributed
+#    # left TOFC seems to be good candidate with sensitivities for all 4 classes
+#    roi_ds = ds.selectFeatures((roi_mask == roilab['TOFC']).nonzero()[0])
+#
+#
+#    # SMLR sensitivity analyzer that fits a weight per feature for each class
+#    sa = SMLR(lm=0.01,
+#              fit_all_weights=True).getSensitivityAnalyzer(
+#                    combiner=N.array,
+#                    null_dist=MCNullDist(permutations=1000, tail='any'))
+#
+#    # get sensitivities for a fit using the whole dataset this time
+#    # (nfeatures x ncategories)
+#    sens = sa(roi_ds)
+#
+#    # store full sensitivities
+#    roi_ds.map2Nifti(sens.T).save('smlr_4cat_tofc.nii.gz')
+#
+#    # store associated null probs
+#    roi_ds.map2Nifti(1-sa.null_prob.T).save('smlr_4cat_tofc_p.nii.gz')
+#
+#    # get features with 'real' sensitivity (nlabels x nfeatures)
+#    thresh_prob = sa.null_prob.T < 0.1
+#
+#    catmap = N.zeros(thresh_prob.shape[1], dtype='int32')
+#
+#    # for all classes
+#    for i in range(thresh_prob.shape[0]):
+#        #fill with class index
+#        catmap[thresh_prob[i]] = i + 1
+#
+#    # finally mark ambiguous voxels
+#    catmap[thresh_prob.sum(axis=0) > 1] = thresh_prob.shape[0] + 2
+#
+#    # dump as nifti file
+#    roi_ds.map2Nifti(catmap).save('smlr_4cat_catmap.nii.gz')
+#
+#    # now limit to sensitivities in ROI
+#    #sens[roi_mask != roilab['TOFC']] = 0
+#    #sens[roi_mask != roilab['LOC']] = 0
+#
+#    plotNonZeroSensitivityDistribution(sens, 20)
+#    plotBestPerClassSensitivities(sens, 10)
+#
+#    senses = doSensitivityAnalysis(roi_ds, {'SMLR(0.01)': SMLR(lm=0.01)},
+#                                   {}, NFoldSplitter())
+#
+#    # generate map from num labels to literal labels
+#    lmap = dict([(v, k) for k,v in ds.labels_map.iteritems()])
+#
+#    # for all class combinations
+#    combinations = getUniqueLengthNCombinations(roi_ds.uniquelabels, 2)
+#    max_sens = Absolute(sens).max()
+#    for i, (k, l) in enumerate(combinations):
+#        P.subplot(2, 3, i+1)
+#        P.plot(sens[:,k-1], sens[:,l-1], '+')
+#        P.xlim((-max_sens, max_sens))
+#        P.ylim((-max_sens, max_sens))
+#        P.title(lmap[k] + ' vs. ' + lmap[l])
+#
