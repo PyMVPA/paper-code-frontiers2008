@@ -11,6 +11,8 @@
 
 __docformat__ = 'restructuredtext'
 
+import matplotlib as mpl
+
 from mvpa.suite import *
 from scipy.io import loadmat
 
@@ -74,7 +76,7 @@ def loadData():
         [('song%d' % (i+1), i+43) for i in xrange(48-43)])
 
 
-    coarsenChunks(d, nchunks=4)         # lets split into 4 chunks
+    coarsenChunks(d, nchunks=8)         # lets split into 4 chunks
 
     return d
 
@@ -100,6 +102,8 @@ def preprocess(ds):
         ds_orig = ds
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
+        # copy labels mapping as well
+        ds.labels_map = ds_orig.labels_map
 
     if options.zscore:
         verbose(2, "Z-scoring full dataset")
@@ -196,61 +200,168 @@ def analysis(ds):
     sensitivities = N.array(cv.harvested.values()[0])
 
     verbose(2, " Training finished. Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], N.mean(stats['MCC'])))
+                (tstats['ACC'], tstats['mean(MCC)'], stats['ACC'], stats['mean(MCC)']))
 
     return cv, sensitivities
+
+def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
+    """
+    Tried to make use of alpha to make low values invisible. Can plot,
+    but couldn't find a way for colorbar to also change it accordingly
+    (not alpha for the whole colorrange). Proper way seems to be to
+    define custom child of LinearSegmentedColormap which on __call__
+    would tune up returned alpha accordingly.
+
+    may be relevant example is on
+    http://www.nabble.com/Re:-Trying-p8831162.html
+
+    So for now just plot as is
+    """
+    method = 'reg'
+
+    # we don't need class ticks here
+    #ax.yaxis.set_major_formatter(P.NullFormatter())
+
+    #ax.yaxis.set_major_locator(P.NullLocator())
+    if method == 'cmap':
+        dumb = cmap(0)                  # force computation of _lut
+        # adjust lut to incorporate alpha
+        n = cmap._lut.shape[0]-3
+        cmap._lut[:n, 3] = 1-(1-N.linspace(0, 1, n, True))**alpha_power
+        ret = ax.imshow(data, cmap=cmap, *args, **kwargs)
+        # doesn't work since it resets cmap._lut
+    elif method == 'alpha_data':
+        #data_rgba = mpl.image.AxesImage(ax).to_rgba(data)
+        data_rgba = cmap(data)
+        # scale alpha by value
+        data_rgba[:, :, 3] = 1-(1-data/N.max(data))**alpha_power
+        ret = ax.imshow(data_rgba, cmap=cmap, *args, **kwargs)
+    else:
+        ret = ax.imshow(data, cmap=cmap, *args, **kwargs)
+
+    P.yticks(())
+    dx = ax.axis()[1]/80
+    for i,l in enumerate(ds.UL):
+        ax.text(-dx, (len(ds.UL)-i)-0.5, ds.labels_map[l],
+               horizontalalignment='right',
+               verticalalignment='center')
+    cb = P.colorbar(ret, shrink=0.9)
+    return ret, cb
 
 
 def do_plots(sensitivities):
     # sana = te.clf.getSensitivityAnalyzer(force_training=False, combiner=lambda x:x)
     # sens = sana()
-    sens = N.mean(sensitivities, axis=0)
-    sensO = ds.mapReverse(sens.T)
+
+    # pre-process sensitivities slightly
+    # which we should have actually done in transformers
+
+    # 1. norm each sensitivity per split/class
+    s = sensitivities
+    snormed = s / N.sqrt(N.sum(s*s, axis=1))[:, N.newaxis, :]
+
+    # 2. take mean across splits
+    smeaned = N.mean(snormed, axis=0)
+
+    sensO = ds.mapReverse(smeaned.T)
     sensOn = L2Normed(sensO)
 
     # Sum of sensitivities across time bins -- so per each neuron/class
-    sensOn_perneuron1 = N.sum(sensOn, axis=1)
+    sensOn_perneuron1 = N.sum(N.abs(sensOn), axis=1)
+    #sensOn_perneuron1 = N.sum(sensOn, axis=1)
 
-    fig = P.figure(figsize=(6, 10))
-    nsx = 1
-    nsy = 3
-    fi = 1
+    nsx = 2
+    nsy = 2
+    fig = P.figure(figsize=(8*nsx, 4*nsy))
     c_n_aspect = 6.0                           # aspect ratio for class x neurons
     c_tb_aspect = 401/105.0*c_n_aspect         # aspect ratio for class x time
 
-    # Lets plot mean counts per each class
-    ax = fig.add_subplot(nsy, nsx, fi); fi += 1
     dsO = ds.O
-    mcounts = []
-    for l in ds.UL:
-        mcounts += [P.sum(P.sum(dsO[ds.labels == l, :, :], axis=0), axis=1)]
-    mcounts = N.array(mcounts)
-    P.imshow(mcounts, interpolation='nearest', aspect=c_tb_aspect)
-    P.xlabel('Time')
-    P.ylabel('Classes')
-    P.title('Spike counts across all neurons')
-    P.colorbar(shrink=1.0)
 
-    ax = fig.add_subplot(nsy, nsx, fi); fi += 1
+    ckwargs = {'interpolation': 'nearest',
+               'origin': 'upper'}
+    # Lets plot mean counts per each class
+    ax = fig.add_subplot(nsy, nsx, 1);
+    if True:
+        # if plotting with imshow
+        mcounts = []
+        mvar = []
+        for l in ds.UL:
+            dsl = dsO[ds.labels == l, :, :]
+            mcounts += [P.mean(P.sum(dsl, axis=2), axis=0)]
+            mvar += [N.mean(N.var(dsl, axis=1), axis=0)]
+        mcounts = N.array(mcounts)
+        mvar = N.array(mvar)
+
+        im,cb = imshow_alphad(mcounts, ax=ax, cmap = P.cm.YlOrRd, #P.cm.OrRd,
+                              aspect=c_tb_aspect, vmin=0, **ckwargs)
+        ax.set_yticklabels( ( ) )
+        P.xlabel('Time(ms)')
+        #P.ylabel('Class')
+        P.title('Mean spike counts')
+
+
+    if False:
+        ax = fig.add_subplot(nsy, nsx, fi); fi += 1
+
+        # plot using plotERPs
+        plots = []
+        # tones will go in the redish, songs in greenish
+        colors = {38: '#550000', 39: '#770000', 40: '#AA0000',
+                  41: '#CC0000', 42: '#FF0000',
+                  43: '#005500', 44: '#339900', 45: '#00BB33',
+                  46: '#33dd00', 47: '#007755'}
+        for l in [38, 47]:#ds.UL:
+            plots += [{'data':P.sum(dsO[ds.labels == l, :, :], axis=2),
+                       'color':colors[l],
+                       'label':ds.labels_map[l]}]
+
+        #colors=('b', 'g', 'r', 'c', 'm', 'y', 'k', 'w')
+        # error type to use in all plots
+        errtype=['std', 'ci95']
+        # TODO: if no post is provided... plotERP fails
+        plotERPs( plots, pre=0, pre_mean=0, SR=1, ax=ax, errtype=errtype,
+                  ylformat='%.2f', ylabel='Spike count', xlabel='Time', post=dsO.shape[1],
+                  legend=True)
+        P.axis('off')
+        #cb = P.colorbar(drawedges=False, alpha=0.0, ticks=False)
+        #P.axis((0.0, 400.0, -1.0, 5.0)) # to size it to match previos one
+        #ax.set_aspect(c_tb_aspect*10.0/6)
+        #P.draw()
+
+    ax = fig.add_subplot(nsy, nsx, 4);
     # TODO: proper labels on y-axis
-    P.imshow(sensOn_perneuron1, interpolation='nearest', origin='lower', aspect=c_n_aspect);
-    P.xlabel('Neurons')
-    P.ylabel('Classes')
-    P.title('Neurons sensitivities')
-    P.colorbar(shrink=1.0)
+    vmax = N.max(N.abs(sensOn_perneuron1))
+    imshow_alphad(sensOn_perneuron1, ax=ax, cmap=P.cm.RdBu, #cmap = P.cm.YlOrRd,
+                  aspect=c_n_aspect, vmin=-vmax, vmax=vmax, **ckwargs);
+    P.xlabel('Neuron')
+    #P.ylabel('Class')
+    P.title('Aggregate neurons sensitivities')
 
-    ax = fig.add_subplot(nsy, nsx, fi); fi += 1
+    ax = fig.add_subplot(nsy, nsx, 2);
+    # Var per class/neuron
+    im,cb = imshow_alphad(mvar, ax=ax, cmap = P.cm.YlOrRd, #P.cm.OrRd,
+                          aspect=c_n_aspect, vmin=0, **ckwargs)
+    P.xlabel('Neuron')
+    #P.ylabel('Class')
+    P.title('Mean variance')
+
+    ax = fig.add_subplot(nsy, nsx, 3);
     sensOn_perneuron = N.sum(sensOn_perneuron1, axis=0)
-    # Strongest neurons -- strongest first
-    strongest_neurons = N.where(sensOn_perneuron>=N.sort(sensOn_perneuron)[-10])[0][::-1]
+    strongest_neuron = N.argsort(sensOn_perneuron)[-1]
 
-    # Lets plot sensitivities in time bins per each class for few 'strongest'
-    P.imshow(sensOn[:, :, strongest_neurons[0]], interpolation='nearest', aspect=c_tb_aspect)
-    P.xlabel('Time')
-    P.ylabel('Classes')
-    P.title('Neuron #%d sensitivity' % strongest_neurons[0])
-    P.colorbar(shrink=1.0)
+    # Lets plot sensitivities in time bins per each class for the 'strongest'
+    sens_neuron = sensOn[:, :, strongest_neuron]
+    mmax = N.max(N.abs(sens_neuron))
+    im, cb = imshow_alphad(sens_neuron, ax=ax, cmap=P.cm.RdBu,
+                  aspect=c_tb_aspect, vmin=-mmax, vmax=mmax, **ckwargs)
+    P.xlabel('Time(ms)')
+    #P.ylabel('Classes')
+    P.title('Neuron #%d sensitivities' % strongest_neuron)
 
+    # widen things up a bit
+    #fig.subplots_adjust(hspace=0.2, wspace=0.2,
+    #                    left=0.05, right=0.95, top=0.95, bottom=0.5)
 
 if __name__ == '__main__':
     ds = loadData()
