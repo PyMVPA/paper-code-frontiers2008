@@ -254,38 +254,3 @@ if __name__ == '__main__':
             (best['2A'][0], best['2A'][2],
              best['2B'][0], best['2B'][2]))
 
-
-def plot_ds_perchunk(ds, clf_labels=None):
-    """Quick plot to see chunk sctructure in dataset with 2 features
-
-    if clf_labels is provided for the predicted labels, then
-    incorrectly labeled samples will have 'x' in them
-    """
-    if ds.nfeatures != 2:
-        raise ValueError, "Can plot only in 2D, ie for datasets with 2 features"
-    if P.matplotlib.get_backend() == 'TkAgg':
-        P.ioff()
-    if clf_labels is not None and len(clf_labels) != ds.nsamples:
-        clf_labels = None
-    colors=('b', 'g', 'r', 'c', 'm', 'y', 'k', 'w')
-    labels = ds.uniquelabels
-    labels_map = dict(zip(labels, colors[:len(labels)]))
-    for chunk in ds.uniquechunks:
-        chunk_text = str(chunk)
-        ids = ds.where(chunks=chunk)
-        ds_chunk = ds[ids]
-        for i in xrange(ds_chunk.nsamples):
-            s = ds_chunk.samples[i]
-            l = ds_chunk.labels[i]
-            format = ''
-            if clf_labels != None:
-                if clf_labels[i] != ds_chunk.labels[i]:
-                    P.plot([s[0]], [s[1]], 'x' + labels_map[l])
-            P.text(s[0], s[1], chunk_text, color=labels_map[l],
-                   horizontalalignment='center',
-                   verticalalignment='center',
-                   )
-    dss = ds.samples
-    P.axis((1.1*N.min(dss[:,0]), 1.1*N.max(dss[:,1]), 1.1*N.max(dss[:,0]), 1.1*N.min(dss[:,1])))
-    P.draw()
-    P.ion()

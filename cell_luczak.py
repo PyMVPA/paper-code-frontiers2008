@@ -16,6 +16,10 @@ import matplotlib as mpl
 from mvpa.suite import *
 from scipy.io import loadmat
 
+# Create  a custom colormap
+from warehouse import inverseCmap
+RdBu_rev = inverseCmap('RdBu')
+
 import os.path
 
 if not locals().has_key('__IP'):
@@ -252,23 +256,6 @@ def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
     return ret, cb
 
 
-def inverse_cmap(cmap_name):
-    """Create a new colormap from the named colormap, where it got reversed"""
-    import matplotlib._cm as _cm
-    import matplotlib as mpl
-    try:
-        cmap_data = eval('_cm._%s_data' % cmap_name)
-    except:
-        raise ValueError, "Cannot obtain data for the colormap %s" % cmap_name
-    new_data = dict( [(k, [(v[i][0], v[-(i+1)][1], v[-(i+1)][2])
-                           for i in xrange(len(v))])
-                      for k,v in cmap_data.iteritems()] )
-    return mpl.colors.LinearSegmentedColormap('%s_rev' % cmap_name, new_data, _cm.LUTSIZE)
-
-
-RdBu_rev = inverse_cmap('RdBu')
-
-
 def finalFigure(sensitivities):
     # pre-process sensitivities slightly
     # which we should have actually done in transformers
@@ -352,7 +339,6 @@ def finalFigure(sensitivities):
     imshow_alphad(sensOn_perneuron1, ax=ax, cmap=RdBu_rev, #cmap = P.cm.YlOrRd,
                   aspect=c_n_aspect, vmin=-vmax, vmax=vmax, **ckwargs);
     P.xlabel('Neuron')
-    #P.ylabel('Class')
     P.title('Aggregate neurons sensitivities')
 
     ax = fig.add_subplot(nsy, nsx, 2);
@@ -360,7 +346,6 @@ def finalFigure(sensitivities):
     im,cb = imshow_alphad(mvar, ax=ax, cmap = P.cm.YlOrRd, #P.cm.OrRd,
                           aspect=c_n_aspect, vmin=0, **ckwargs)
     P.xlabel('Neuron')
-    #P.ylabel('Class')
     P.title('Mean variance')
 
     ax = fig.add_subplot(nsy, nsx, 3);
@@ -373,7 +358,6 @@ def finalFigure(sensitivities):
     im, cb = imshow_alphad(sens_neuron, ax=ax, cmap=RdBu_rev,
                   aspect=c_tb_aspect, vmin=-mmax, vmax=mmax, **ckwargs)
     P.xlabel('Time(ms)')
-    #P.ylabel('Classes')
     P.title('Neuron #%d sensitivities' % strongest_neuron)
 
     # widen things up a bit
