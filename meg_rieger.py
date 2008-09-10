@@ -8,18 +8,20 @@
 #
 
 from mvpa.suite import *
+from warehouse import doSensitivityAnalysis
 
 if not locals().has_key('__IP'):
     opt.verbose.default = 3                    # for now
-    parser.add_options([opt.zscore])
+    parser.add_options([opt.zscore, opt.do_sweep])
     parser.option_groups = [opts.common, opts.wavelet]
     (options, files) = parser.parse_args()
 else:
     class O(object): pass
     options = O()
-    options.wavelet_family = None#'db1'
+    options.wavelet_family = None #'db1'
     options.wavelet_decomposition = 'dwp'
     options.zscore = True
+    options.do_sweep = False
 
 verbose.level = 4
 
@@ -117,14 +119,9 @@ def loadData(subj):
 
     return dataset
 
-
-if __name__ == '__main__':
-    # load the only subject that we have
-    verbose(1, 'Loading data for subject: ' + subj)
-    ds = loadData(subj)
-
-    print ds.summary()
-
+def preprocess(ds):
+    """Additional preprocessing
+    """
     if options.wavelet_family is not None:
         verbose(2, "Converting into wavelets family %s."
                 % options.wavelet_family)
@@ -139,6 +136,7 @@ if __name__ == '__main__':
         ds_orig = ds
         ebdata_wt = WT(ebdata)
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
+        ds.labels_map = ds_orig.labels_map
 
     verbose(1, 'Precondition data')
     doZScore = True
@@ -150,7 +148,7 @@ if __name__ == '__main__':
         ds.samples *= 1.0/N.max(N.abs(ds.O[:,:33,:]))
     print ds.summary()
 
-    doSelectNFeaturesAnova = False
+    doSelectNFeaturesAnova = True
     if doSelectNFeaturesAnova:
         # For now lets just cheat and do on the whole ds, although it
         # doesnt bias selection much (if at all) if later on we just do
@@ -158,16 +156,22 @@ if __name__ == '__main__':
         verbose(1, 'Cruel feature selection')
         ss = SensitivityBasedFeatureSelection(
             OneWayAnova(),
-            #FractionTailSelector(0.20, mode='select', tail='upper')
-            FixedNElementTailSelector(2, mode='select', tail='upper')
+            FractionTailSelector(0.10, mode='select', tail='upper')
+            #FixedNElementTailSelector(2, mode='select', tail='upper')
             )
         ds = ss(ds)[0]
         print ds.summary()
 
+    return ds
+
+
+def clfSweep(ds):
+    """Test various classifiers
+    """
     # Test few classifiers
     best = {}
     # libsvr never converges for some reason
-    #for clf in clfs['linear', '!lars', '!blr', '!libsvr', '!meta']:#[:1]:#[::-1]:
+    # for clf in clfs['linear', '!lars', '!blr', '!libsvr', '!meta']:
     for clf in [sg.SVM(kernel_type='linear')]:
         # C=-2.0 gives 84% when properly scaled and 5% ANOVA voxels
         # C=-1.0 and RFE gives up to 85% correct
@@ -201,10 +205,10 @@ if __name__ == '__main__':
         #                           # remove 20% of features at each step
         #        update_sensitivity=True)),
         #        # update sensitivity at each step
-        #    descr='LinSVM+RFE(N-Fold,static)')
+        #    descr='LinSVM+RFE(N-Fold)')
 
-        #fesvm_split = SplitClassifier(rfesvm)
-        #lf = FeatureSelectionClassifier(
+        #rfesvm_split = SplitClassifier(rfesvm)
+        #clf = FeatureSelectionClassifier(
         # clf = clf,
         # feature_selection = RFE(             # on features selected via RFE
         #     # based on sensitivity of a clf which does splitting internally
@@ -253,4 +257,127 @@ if __name__ == '__main__':
             "was %g achieved using %s" %
             (best['2A'][0], best['2A'][2],
              best['2B'][0], best['2B'][2]))
+
+
+def analysis(ds):
+
+    # Lets first replicate the obtained resuls.  We can do slightly
+    # better using RFEs and initial feature selection, but lets just
+    # replicate
+    #
+    clf = sg.SVM(kernel_type='linear')
+    # C=-2.0 gives 84% when properly scaled and 5% ANOVA voxels
+    # C=-1.0 and RFE gives up to 85% correct
+    # clf = sg.SVM(kernel_type='linear')
+    C = -2.0
+
+    # Scale C according  to the number of samples per class
+    spl = ds.samplesperlabel
+    ratio = N.sqrt(float(spl[0])/spl[1])
+    clf.C = (C/ratio, C*ratio)
+
+    # If we were only to do classification, following snippet is sufficient.
+    # But lets reuse doSensitivityAnalysis
+    #
+    # cv2A = CrossValidatedTransferError(
+    #           TransferError(clf),
+    #           NFoldSplitter(),
+    #           enable_states=['confusion', 'training_confusion', 'splits'])
+    #
+    # verbose(1, "Running cross-validation on %s" % clf.descr)
+    # error2A = cv2A(ds)
+    # verbose(2, "Figure 2A LOO performance:\n%s" % cv2A.confusion)
+
+    # Used in RFE implementations
+    rfesvm = sg.SVM(kernel_type='linear')
+    rfesvm.C = clf.C
+    rfesvm_split = SplitClassifier(rfesvm)
+    clfs = {
+        # explicitly instruct SMLR just to fit a single set of weights for our
+        # binary task
+        'SMLR': SMLR(lm=0.1, fit_all_weights=False),
+        'lCSVM': clf,
+        'lGPR': GPR(kernel=KernelLinear()),
+        'lCSVM+RFE(farm)': SplitClassifier( # which does splitting internally
+           FeatureSelectionClassifier(
+            clf = clf,
+            feature_selection = RFE(             # on features selected via RFE
+                sensitivity_analyzer=\
+                    rfesvm.getSensitivityAnalyzer(transformer=Absolute),
+                transfer_error=TransferError(rfesvm),
+                stopping_criterion=FixedErrorThresholdStopCrit(0.05),
+                feature_selector=FractionTailSelector(
+                                   0.2, mode='discard', tail='lower'),
+                                   # remove 20% of features at each step
+                update_sensitivity=True)),
+                # update sensitivity at each step
+            descr='LinSVM+RFE(farm,N-Fold)'),
+        'lCSVM+RFE(mean)': FeatureSelectionClassifier(
+          clf = clf,
+          feature_selection = RFE(             # on features selected via RFE
+            # based on sensitivity of a clf which does splitting internally
+            sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
+                transformer=Absolute),
+            transfer_error=ConfusionBasedError(
+               rfesvm_split, confusion_state="confusion"),
+               # and whose internal error we use
+            feature_selector=FractionTailSelector(
+                               0.2, mode='discard', tail='lower'),
+                               # remove 20% of features at each step
+            update_sensitivity=True),
+            # update sensitivity at each step
+          descr='LinSVM+RFE(avg,N-Fold)' )
+        }
+
+    # define some pure sensitivities (or related measures)
+    sensanas={
+        'ANOVA': OneWayAnova(),
+        # Crashes for Yarik -- I guess openopt issue
+        #'GPR_Model': GPRWeights(GPR(kernel=KernelLinear()), combiner=None),
+        #
+        # no I-RELIEF for now -- takes too long
+        #'I-RELIEF': IterativeReliefOnline(),
+        # gimme more !!
+        }
+
+    # perform the analysis and get all sensitivities
+    senses = doSensitivityAnalysis(ds, clfs, sensanas, NFoldSplitter())
+
+    # assign original single C
+    clf.C = C
+    # get results from Figure2B with resampling of the samples to
+    # ballance number of samples per label
+    cv2B = CrossValidatedTransferError(
+              TransferError(clf),
+              NFoldSplitter(nperlabel='equal',
+                            # increase to reasonable number
+                            nrunspersplit=4),
+              enable_states=['confusion', 'training_confusion'])
+
+    error2B = cv2B(ds)
+
+    verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
+
+    # Sure we repeat ourselves here but for the sake of clarity
+    return senses
+
+
+def finalFigure(ds_pristine, ds, senses, channel):
+    return fig
+
+if __name__ == '__main__':
+    # load the only subject that we have
+    verbose(1, 'Loading data for subject: ' + subj)
+    ds = loadData(subj)
+    ds_pristine = ds.copy()
+    print ds.summary()
+    ds = preprocess(ds)
+    if options.do_sweep:
+        clfSweep(ds)
+    else:
+        senses = analysis(ds)
+        finalFigure(ds_pristine, ds, senses, 0)
+
+
+
 
