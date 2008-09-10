@@ -29,12 +29,6 @@ if not locals().has_key('__IP'):
                         default=False,
                         help="Either to process LFP instead of spike counts")
 
-    opt.do_sweep = \
-                 Option("--sweep",
-                        action="store_true", dest="do_sweep",
-                        default=False,
-                        help="Either to only sweep through various classifiers")
-
     opt.verbose.default=2                    # for now
     parser.add_options([opt.zscore, opt.do_lfp, opt.do_sweep])
     parser.option_groups = [opts.common, opts.wavelet]
@@ -201,12 +195,12 @@ def analysis(ds):
     error = cv(dsc)
     tstats = cv.training_confusion.stats
     stats = cv.confusion.stats
-    sensitivities = N.array(cv.harvested.values()[0])
+    senses = N.array(cv.harvested.values()[0])
 
     verbose(2, " Training finished. Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
                 (tstats['ACC'], tstats['mean(MCC)'], stats['ACC'], stats['mean(MCC)']))
 
-    return cv, sensitivities
+    return senses
 
 
 def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
@@ -256,13 +250,12 @@ def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
     return ret, cb
 
 
-def finalFigure(sensitivities):
+def finalFigure(senses):
     # pre-process sensitivities slightly
     # which we should have actually done in transformers
 
     # 1. norm each sensitivity per split/class
-    s = sensitivities
-    snormed = s / N.sqrt(N.sum(s*s, axis=1))[:, N.newaxis, :]
+    snormed = senses / N.sqrt(N.sum(senses*senses, axis=1))[:, N.newaxis, :]
 
     # 2. take mean across splits
     smeaned = N.mean(snormed, axis=0)
@@ -363,6 +356,8 @@ def finalFigure(sensitivities):
     # widen things up a bit
     #fig.subplots_adjust(hspace=0.2, wspace=0.2,
     #                    left=0.05, right=0.95, top=0.95, bottom=0.5)
+    return fig
+
 
 if __name__ == '__main__':
     ds = loadData()
@@ -372,7 +367,7 @@ if __name__ == '__main__':
         # To check what we can possibly get with different classifiers
         clfSweep(ds)
     else:
-        cv, senses = analysis(ds)
+        senses = analysis(ds)
         finalFigure(senses)
         pass
 

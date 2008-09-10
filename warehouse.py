@@ -117,3 +117,12 @@ def inverseCmap(cmap_name):
                       for k,v in cmap_data.iteritems()] )
     return mpl.colors.LinearSegmentedColormap('%s_rev' % cmap_name, new_data, _cm.LUTSIZE)
 
+
+# Lets add few additional cmdline options
+
+opt.do_sweep = \
+             Option("--sweep",
+                    action="store_true", dest="do_sweep",
+                    default=False,
+                    help="Either to only sweep through various classifiers")
+
