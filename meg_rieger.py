@@ -29,7 +29,11 @@ verbose.level = 4
 datapath = cfg.get('paths', 'data root', default='data/meg.rieger')
 verbose(1, 'Datapath is %s' % datapath)
 
-conditions = {'false': 'cosu', 'unsure': 'fausu'}
+all_conditions = (('Correct Sure', 'cosu'),  ('Correct Unsure', 'cousu'),
+                  ('False Unsure', 'fausu'), ('False Sure', 'fasu'))
+conditions = dict([all_conditions[0], all_conditions[2]])
+conditions_name = '-'.join(conditions.values())
+
 subj = 'vp02'
 # sampling rate after preprocessing in Hz
 target_samplingrate = 80
@@ -101,7 +105,7 @@ def loadData(subj):
 
         # hmm, the code below does a better job than coarsenChunks, wrt to
         # equalized distribution of samples....
-        nchunks = 10
+        nchunks = 8
         for l in dataset.uniquelabels:
             dataset.chunks[dataset.labels==l] = \
                 N.arange(N.sum(dataset.labels == l)) % nchunks
@@ -297,9 +301,9 @@ def analysis(ds):
     clfs = {
         # explicitly instruct SMLR just to fit a single set of weights for our
         # binary task
-        'SMLR': SMLR(lm=0.1, fit_all_weights=False),
+        'SMLR': SMLR(lm=1.0, fit_all_weights=False),
         'lCSVM': clf,
-        'lGPR': GPR(kernel=KernelLinear()),
+        #'lGPR': GPR(kernel=KernelLinear()),
         #'lCSVM+RFE(farm)': SplitClassifier( # which does splitting internally
         #   FeatureSelectionClassifier(
         #    clf = clf,
@@ -314,21 +318,21 @@ def analysis(ds):
         #        update_sensitivity=True)),
         #        # update sensitivity at each step
         #    descr='LinSVM+RFE(farm,N-Fold)'),
-        'lCSVM+RFE(mean)': FeatureSelectionClassifier(
-          clf = clf,
-          feature_selection = RFE(             # on features selected via RFE
-            # based on sensitivity of a clf which does splitting internally
-            sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
-                transformer=Absolute),
-            transfer_error=ConfusionBasedError(
-               rfesvm_split, confusion_state="confusion"),
-               # and whose internal error we use
-            feature_selector=FractionTailSelector(
-                               0.2, mode='discard', tail='lower'),
-                               # remove 20% of features at each step
-            update_sensitivity=True),
-            # update sensitivity at each step
-          descr='LinSVM+RFE(avg,N-Fold)' )
+        #'lCSVM+RFE(mean)': FeatureSelectionClassifier(
+        #  clf = clf,
+        #  feature_selection = RFE(             # on features selected via RFE
+        #    # based on sensitivity of a clf which does splitting internally
+        #    sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
+        #        transformer=Absolute),
+        #    transfer_error=ConfusionBasedError(
+        #       rfesvm_split, confusion_state="confusion"),
+        #       # and whose internal error we use
+        #    feature_selector=FractionTailSelector(
+        #                       0.2, mode='discard', tail='lower'),
+        #                       # remove 20% of features at each step
+        #    update_sensitivity=True),
+        #    # update sensitivity at each step
+        #  descr='LinSVM+RFE(avg,N-Fold)' )
         }
 
     # define some pure sensitivities (or related measures)
@@ -364,16 +368,19 @@ def analysis(ds):
     return senses
 
 
-def finalFigure(ds_pristine, ds, senses, channel):
+def finalFigure(ds_pristine, ds, senses, channel,
+                fig=None, nsx=1, nsy=2, serp=1, ssens=2):
     """Pretty much rip off the EEG script
     """
     SR = ds_pristine.samplingrate
     # data is already trials, this would correspond sec before onset
-    pre = -(int(ds_pristine.t0*100)/100.0)   # round to 2 digits
+    pre_onset = -(int(ds_pristine.t0*100)/100.0)   # round to 2 digits
+    pre = 0.05
     # number of channels, samples per trial
     nchannels, spt = ds_pristine.mapper.mask.shape
     # compute seconds in trials after onset
-    post = post_duration
+    #post = post_duration
+    post = 0.41 #post_duration
 
     # index of the channel of interest
     ch_of_interest = ds_pristine.channelids.index(channel)
@@ -381,10 +388,11 @@ def finalFigure(ds_pristine, ds, senses, channel):
     # error type to use in all plots
     errtype=['std', 'ci95']
 
-    fig = P.figure(facecolor='white', figsize=(12, 6))
+    if fig is None:
+        fig = P.figure(facecolor='white', figsize=(12, 6))
 
     # plot ERPs
-    ax = fig.add_subplot(2, 1, 1, frame_on=False)
+    ax = fig.add_subplot(nsy, nsx, serp, frame_on=False)
 
     plots = []
     colors = ('r', 'b', '0')
@@ -405,11 +413,16 @@ def finalFigure(ds_pristine, ds, senses, channel):
                  'pre_mean': 0})
 
     plotERPs( plots,
-              pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
-              ylabel='fT', ylformat='%.1f', xlabel=None, legend=True)
+              pre=pre, pre_onset=pre_onset,
+              pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
+              ylim=(-500, 300), ylabel='fT', ylformat='%.1f',
+              xlabel=None,
+              #xlabel='Time(s)',
+              legend=True)
 
+    P.title(channel)
     # plot sensitivities
-    ax = fig.add_subplot(2, 1, 2, frame_on=False)
+    ax = fig.add_subplot(nsy, nsx, ssens, frame_on=False)
 
     sens_labels = []
     erp_cfgs = []
@@ -445,8 +458,10 @@ def finalFigure(ds_pristine, ds, senses, channel):
     # just ci95 error here, due to the low number of folds not much different
     # from std; also do _not_ demean based on initial baseline as we want the
     # untransformed sensitivities
-    plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype='ci95',
-             ylabel=None, ylformat='%.2f', pre_mean=0)
+    plotERPs(erp_cfgs, pre=pre, pre_onset=pre_onset,
+             post=post, SR=SR, ax=ax, errtype='ci95',
+             ylim=(-0.05, 0.3),
+             ylabel=None, xlabel=None, ylformat='%.2f', pre_mean=0)
 
     P.legend(sens_labels)
 
@@ -464,10 +479,20 @@ if __name__ == '__main__':
         clfSweep(ds)
     else:
         senses = analysis(ds)
-        for sens in ds_pristine.channelids:
-            fig = finalFigure(ds_pristine, ds, senses, sens)
-            fig.savefig('/tmp/meg_rieger-fig1-%s.png' % sens, dpi=80)
+
+        # Draw per interesting channel
+        for c in ['MRO22', 'MRO32', 'MZO01']:
+            fig = finalFigure(ds_pristine, ds, senses, c)
+            fig.savefig('figs/meg_rieger-%s-%s.svg' % (conditions_name, c))
+            fig.savefig('figs/meg_rieger-%s-%s.png' % (conditions_name, c), dpi=90)
             P.close(fig)
 
-
-
+        # Draw combined for two interesting channels
+        fig = P.figure(figsize=(10,5), facecolor='white')
+        finalFigure(ds_pristine, ds, senses, 'MRO22', fig, 2, 2, 1, 3)
+        finalFigure(ds_pristine, ds, senses, 'MZO01', fig, 2, 2, 2, 4)
+        fig.subplots_adjust(left=0.01, right=0.99, bottom=0.05, wspace=0.01)
+        P.draw()
+        fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.svg' % (conditions_name))
+        fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.png' % (conditions_name), dpi=90)
+ 
