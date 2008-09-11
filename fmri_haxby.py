@@ -35,12 +35,17 @@ atlas = dict([(int(el.getAttribute('index')) + 1,
                el.firstChild.data)
                     for el in atlas.getElementsByTagName('label')])
 
-atlas_abbrev = {'Lateral Occipital Cortex, inferior division': 'LOC inf.',
+atlas_abbrev = {'Lateral Occipital Cortex, inferior division': 'LOC, inf.',
                 # need to preserve typo in Atlas label ;-)
-                'Lateral Occipital Cortex, superoir division': 'LOC sup.',
+                'Lateral Occipital Cortex, superoir division': 'LOC, sup.',
                 'Temporal Occipital Fusiform Cortex': 'TOFC',
-                'Temporal Fusiform Cortex, posterior division': 'TFC post.',
+                'Temporal Fusiform Cortex, posterior division': 'TFC, post.',
                 "Heschl's Gyrus (includes H1 and H2)": "Heschl's G.",
+                'Angular Gyrus': 'Angular G.',
+                'Precuneous Cortex': 'Precuneous',
+                'Precentral Gyrus': 'Precentral G.',
+                'Superior Temporal Gyrus, anterior division': 'STG, ant.',
+                'Lingual Gyrus': 'Lingual G.',
                }
 
 
@@ -57,7 +62,6 @@ def makeFinalFigure(ds, senses, atlas_ids, atlas_map):
                         ('SMLR',
                          [s[1] for s in senses if s[0].startswith('SMLR')][0]),
                         atlas_id, atlas_map)
-        P.xlabel(nvoxels)
         plts += 1
         axes.append(P.subplot(2, 4, plts))
         plotAtlasROISampleDistanceDendrogram(
@@ -66,7 +70,7 @@ def makeFinalFigure(ds, senses, atlas_ids, atlas_map):
                  [s[1] for s in senses if s[0].startswith('ANOVA')][0]),
                  atlas_id, atlas_map, limit=nvoxels)
 
-        P.ylabel(atlas[atlas_id] + '(' + str(nvoxels) + ')')
+        P.ylabel(atlas[atlas_id] + '(nvoxels: ' + str(nvoxels) + ')')
         plts += 1
     # maximum distance range 
     ymax = max([ax.get_ylim()[1] for ax in axes])
@@ -185,10 +189,10 @@ def plotROISensitivityScores(sens_scores, nmin_rois, nmax_rois, ranks):
 
     # compute x labels positions
     P.xticks(N.arange(len(rois)) \
-             + bar_offset + bar_width * len(sens_scores) / 2.0, rois)
+             + bar_width * len(sens_scores) / 2.0, rois)
     labels = P.gca().get_xticklabels()
     # rotate labels
-    P.setp(labels, rotation=90)
+    P.setp(labels, rotation=45)
 
 
 
@@ -201,7 +205,7 @@ if __name__ == '__main__':
 
     verbose(1, 'Dataset after preprocessing:\n%s' % ds.summary())
 
-    do_analyses = False
+    do_analyses = True
     if do_analyses == True:
         # some classifiers to test
         clfs = {'SMLR': SMLR(lm=0.1)}
@@ -219,8 +223,6 @@ if __name__ == '__main__':
         picklefile = open(os.path.join(datapath, subj + '_4cat_pickled.dat'))
         senses = cPickle.load(picklefile)
         picklefile.close()
-
-    #doClusterAnalysis(ds, senses, roi_mask, roilab)
 
     atlas_nim = \
         NiftiImage(os.path.join(datapath, subj,
@@ -250,5 +252,6 @@ if __name__ == '__main__':
 
     P.figure()
     plotROISensitivityScores(sens_scores, 3, 10, rank)
+    P.ylabel('L1-normed sensitivities')
     P.figure()
     makeFinalFigure(ds, senses, [39, 1, 21, 9], atlas_mask)
