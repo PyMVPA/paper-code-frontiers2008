@@ -35,17 +35,27 @@ atlas = dict([(int(el.getAttribute('index')) + 1,
                el.firstChild.data)
                     for el in atlas.getElementsByTagName('label')])
 
-atlas_abbrev = {'Lateral Occipital Cortex, inferior division': 'LOC, inf.',
-                # need to preserve typo in Atlas label ;-)
-                'Lateral Occipital Cortex, superoir division': 'LOC, sup.',
-                'Temporal Occipital Fusiform Cortex': 'TOFC',
-                'Temporal Fusiform Cortex, posterior division': 'TFC, post.',
-                "Heschl's Gyrus (includes H1 and H2)": "Heschl's G.",
-                'Angular Gyrus': 'Angular G.',
-                'Precuneous Cortex': 'Precuneous',
-                'Precentral Gyrus': 'Precentral G.',
-                'Superior Temporal Gyrus, anterior division': 'STG, ant.',
-                'Lingual Gyrus': 'Lingual G.',
+atlas_abbrev = {
+    'Lateral Occipital Cortex, inferior division': 'LOC, inf.',
+   # need to preserve typo in Atlas label ;-)
+   'Lateral Occipital Cortex, superoir division': 'LOC, sup.',
+   'Temporal Occipital Fusiform Cortex': 'TOFC',
+   'Temporal Fusiform Cortex, posterior division': 'TFC, post.',
+   "Heschl's Gyrus (includes H1 and H2)": "Heschl's G.",
+   'Angular Gyrus': 'Angular G.',
+   'Precuneous Cortex': 'Precuneous',
+   'Precentral Gyrus': 'Precentral G.',
+   'Postcentral Gyrus': 'Postcentral G.',
+   'Superior Temporal Gyrus, anterior division': 'STG, ant.',
+   'Lingual Gyrus': 'Lingual G.',
+   'Superior Frontal Gyrus': 'SFG',
+   'Middle Frontal Gyrus': 'MFG',
+   'Occipital Fusiform Gyrus': 'OFG',
+   'Superior Parietal Lobule': 'SupParL',
+   'Inferior Temporal Gyrus, temporooccipital part': 'ITG, temp-occ.',
+   'Cingulate Gyrus, posterior division': 'CG, post.',
+   'Inferior Frontal Gyrus, pars triangularis': 'IFG, pt',
+   'Paracingulate Gyrus': 'Paracingulate G.',
                }
 
 
@@ -125,6 +135,10 @@ def plotSampleDistanceDendrogram(ds):
                      labels=[lmap[l] for l in ds.labels],
                      link_color_func=lambda x: 'black',
                      distance_sort=False)
+    labels = P.gca().get_xticklabels()
+    # rotate labels
+    P.setp(labels, rotation=90, fontsize=9)
+
 
 
 
@@ -189,10 +203,10 @@ def plotROISensitivityScores(sens_scores, nmin_rois, nmax_rois, ranks):
 
     # compute x labels positions
     P.xticks(N.arange(len(rois)) \
-             + bar_width * len(sens_scores) / 2.0, rois)
+             + bar_offset + bar_width * len(sens_scores) / 2.0, rois)
     labels = P.gca().get_xticklabels()
     # rotate labels
-    P.setp(labels, rotation=45)
+    P.setp(labels, rotation=90)
 
 
 
@@ -205,7 +219,7 @@ if __name__ == '__main__':
 
     verbose(1, 'Dataset after preprocessing:\n%s' % ds.summary())
 
-    do_analyses = True
+    do_analyses = False
     if do_analyses == True:
         # some classifiers to test
         clfs = {'SMLR': SMLR(lm=0.1)}
@@ -230,6 +244,7 @@ if __name__ == '__main__':
 
     atlas_mask = ds.mapForward(atlas_nim.data)
 
+    del (senses[1])
     rank = {}
     sens_scores = {}
     # for all available sensitivities
@@ -251,7 +266,7 @@ if __name__ == '__main__':
         sens_scores[sid] = dict(scores)
 
     P.figure()
-    plotROISensitivityScores(sens_scores, 3, 10, rank)
+    plotROISensitivityScores(sens_scores, 3, 20, rank)
     P.ylabel('L1-normed sensitivities')
-    P.figure()
+    P.figure(figsize=(4,7))
     makeFinalFigure(ds, senses, [39, 1, 21, 9], atlas_mask)
