@@ -17,22 +17,14 @@ in the special issue 'Python in Neuroscience' of the journal 'Frontiers
 in Neuroinformatics'.
 """
 
-# import the full PyMVPA suite
-from mvpa.suite import *
+__docformat__ = 'restructuredtext'
 
-# import machine learning analysis code, common to all analyses
-from warehouse import doSensitivityAnalysis
+# import functionality, common to all analyses
+from warehouse import *
 
 # functionality for cluster analyis
 import hcluster as clust
 
-# efficiently dump and load intermediate results
-import cPickle
-
-
-
-# report everything
-verbose.level = 100
 
 # configure the data source directory
 datapath = os.path.join(cfg.get('paths', 'data root', default='data'),

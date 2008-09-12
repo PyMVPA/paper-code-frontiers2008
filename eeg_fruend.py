@@ -10,32 +10,44 @@
 
 __docformat__ = 'restructuredtext'
 
-from mvpa.suite import *
-from warehouse import doSensitivityAnalysis
-import cPickle
 
-verbose.level = 4
+# import functionality, common to all analyses
+from warehouse import *
 
+
+# configure the data source directory
 datapath = os.path.join(cfg.get('paths', 'data root', default='data'),
                         'eeg.fruend')
 verbose(1, 'Datapath is %s' % datapath)
 
+# use a single subject for this analysis
 subj = 'ga14'
 
+# load names and location information of EEG electrodes
 sensors = XAVRSensorLocations(os.path.join(datapath, 'xavr1010.dat'))
 verbose(1, 'Loaded sensor information')
 
-# Code our poor labels
-# XXX: only need id2label
+
+# Define mapping of literal to numerical labels
 label2id = {'dfn': 1, 'dfo': 2, 'dmn': 3, 'dmo': 4,
              'sfn': 5, 'sfo': 6, 'smn': 7, 'smo': 8}
 id2label = dict( [(x[1], x[0]) for x in label2id.iteritems()])
 
+# which binary problem to analyze
 mode = 'color' # object, delayed
+
+# set target sampling rate for preprocessing
 target_samplingrate = 200.0
 
 
 def labels2binlabels(ds, mode):
+    """Recode labels of a dataset (inplace) to a certain binary problem.
+
+    :Parameters:
+      ds: Dataset
+        Dataset to be recoded.
+      mode: str ('delayed' | 'color' | 'object')
+    """
     try:
         filt = {'delayed': [1, 2, 3, 4],
                 'color':   [1, 2, 5, 6],
@@ -43,29 +55,32 @@ def labels2binlabels(ds, mode):
     except KeyError:
         raise ValueError, 'Unknown label recoding mode %s' % mode
 
-    # XXX N.setmember1d should do smth like what we need but it does
-    #     smth else ;-)
-    # ACTUALLY: this should work:
-    # N.logical_or.reduce(dataset.labels[:,None] == filt, axis=1).astype(int)
-    # it seems not to be shorter though ;-) but more efficient! (may be ;-))
-
     ds.labels[:]=N.array([i in filt for i in ds.labels], dtype='int')
-
-    # also we have now where, so smth like
-    # l1 = ds.where(labels=[filt]); ds.labels[:] = 0; ds.labels[l1] = 1
-    # should do
 
 
 def loadData(subj):
-    ds = []                             # list of datasets
+    """Load data for one subject and return dataset.
+
+    :Parameter:
+      subj: str
+        ID of the subject who's data should be loaded.
+
+    :Returns:
+      EEPDataset instance.
+    """
+    # list of datasets
+    ds = []
 
     verbose(1, "Loading EEG data from basepath %s" % datapath)
+
+    # load data from individual files
     for k, v in id2label.iteritems():
         filename = os.path.join(datapath, subj, v + '.bin')
         verbose(2, "Loading data '%s' with labels '%i'" % (v, k))
 
         ds += [EEPDataset(filename, labels=k)]
 
+    # combine into a single dataset
     d = reduce(lambda x,y: x+y, ds)     # combine into a single dataset
 
     verbose(1, 'Limit to binary problem: ' + mode)
@@ -79,6 +94,19 @@ def loadData(subj):
 
 
 def finalFigure(ds_pristine, ds, senses, channel):
+    """Generate final ERP, sensitivity and topography plots
+
+    :Parameters:
+      ds_pristine: Dataset
+        Original (pristine dataset) used to generate ERP plots
+      ds: Dataset
+        Dataset as used for the sensitivity analyses to generate
+        sensitivity and topography plots
+      senses: list of 2-tuples (sensitiv. ID, sensitvities (nfolds x nfeatures)
+        The sensitvities used to select a subset of voxels in each ROI
+      channel: str
+        Id of the channel to be used for ERP and sensitivity plots over time.
+    """
     # sampling rate
     SR = ds_pristine.samplingrate
     # data is already trials, this would correspond sec before onset
@@ -99,26 +127,30 @@ def finalFigure(ds_pristine, ds, senses, channel):
     # plot ERPs
     ax = fig.add_subplot(2, 1, 1, frame_on=False)
 
+    # map dataset samples back into original (electrode) space
     responses = [ ds_pristine['labels', i].O[:, ch_of_interest, :]
                   for i in [0, 1] ]
+    # compute difference wave between the two conditions
     dwave = N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
                     ndmin=2)
+    # plot them all at once
     plotERPs( [{'label':'lineart', 'color':'r', 'data':responses[0]},
                {'label':'picture', 'color':'b', 'data':responses[1]},
                {'label':'dwave',   'color':'0', 'data':dwave, 'pre_mean':0}],
                pre=pre, pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
               ylformat='%d', xlabel=None)
 
-    # plot sensitivities
+    # plot sensitivities over time
     ax = fig.add_subplot(2, 1, 2, frame_on=False)
 
     sens_labels = []
     erp_cfgs = []
     colors = ['red', 'green', 'blue', 'cyan', 'magenta']
 
+    # for all available sensitivities
     for i, (sens_id, sens) in enumerate(senses[::-1]):
         sens_labels.append(sens_id)
-        # back-project
+        # back-project into electrode space
         backproj = ds.mapReverse(sens)
 
         # and normalize so that all non-zero weights sum up to 1
@@ -132,8 +164,6 @@ def finalFigure(ds_pristine, ds, senses, channel):
 
         # sign of sensitivities is up to classifier relabling of the
         # input classes.
-        # TODO: make it explicit, for now judge by the mean and flip
-        #       if needed
         if ch_sens.mean() < 0:
             ch_sens *= -1
 
@@ -149,6 +179,7 @@ def finalFigure(ds_pristine, ds, senses, channel):
     plotERPs(erp_cfgs, pre=pre, post=post, SR=SR, ax=ax, errtype='ci95',
              ylabel=None, ylformat='%.2f', pre_mean=0)
 
+    # add a legend to the figure
     P.legend(sens_labels)
 
     # how many sensitivities do we have
@@ -157,6 +188,7 @@ def finalFigure(ds_pristine, ds, senses, channel):
     # new figure for topographies
     fig = P.figure(facecolor='white', figsize=((nsens+1)*3, 4))
 
+    # again for all available sensitvities
     for i, (sens_id, sens) in enumerate(senses):
         ax = fig.add_subplot(1, nsens+1, i+1, frame_on=False)
         # back-project: yields (nfolds x nchannels x ntimepoints)
@@ -165,7 +197,6 @@ def finalFigure(ds_pristine, ds, senses, channel):
         # as positive ones...
         # we can do that only after we avg across splits
         avgbackproj = backproj.mean(axis=0)
-
         # compute per channel scores and average across folds
         # (yields (nchannels, )
         scores = N.sum(Absolute(avgbackproj), axis=1)
@@ -181,9 +212,9 @@ def finalFigure(ds_pristine, ds, senses, channel):
         plotHeadTopography(scores, sensors.locations(),
                            plotsensors=True, resolution=50,
                            interpolation='nearest')
+        # ensure uniform scaling
         P.clim(vmin=0, vmax=0.4)
         # No need for full title
-        # P.title(sens_id + '\n%s=%.3f' % ('Pz', scores[sensors.names.index('Pz')]))
         P.title(re.sub(' .*', '', sens_id)) # just plot name
 
         axis = P.axis()                 # to preserve original size
@@ -209,30 +240,15 @@ if __name__ == '__main__':
     verbose(1, 'Group data into %i handy chunks' % nchunks)
     coarsenChunks(ds, nchunks)
 
-    # Re-reference the data relative to avg reference... not sure if
-    # that would give any result
-    do_avgref = False
-    if do_avgref:
-        verbose(1, 'Rereferencing data')
-        ebdata = ds.mapper.reverse(ds.samples)
-        ebdata_orig = ebdata
-        avg = N.mean(ebdata[:,:-3,:], axis=1)
-        ebdata_ = ebdata.swapaxes(1,2)
-        ebdata_[:,:,:-3] -= avg[:,:,N.newaxis]
-        ebdata = ebdata_.swapaxes(1,2)
-        ds.samples = ds.mapper.forward(ebdata)
-
     verbose(1, 'A-priori feature selection')
     # a-priori feature selection
     mask = ds.mapper.getMask()
     # throw away EOG channels
     mask[-3:] = False
-    # throw away timepoints prior onset
-#    mask[:, :int(-ds.t0 * ds.samplingrate)] = False
 
-    print ds.summary()
     # apply selection
     ds = ds.selectFeatures(ds.mapForward(mask).nonzero()[0])
+    # print short summary to give confidence ;-)
     print ds.summary()
 
     do_zscore = True
@@ -249,17 +265,12 @@ if __name__ == '__main__':
             # binary task
             'SMLR': SMLR(lm=0.1, fit_all_weights=False),
             'lCSVM': LinearCSVMC(),
-            # 'sglCSVM': sg.SVM(), # lets see if we observe the same flip effect
             'lGPR': GPR(kernel=KernelLinear()),
             }
 
         # define some pure sensitivities (or related measures)
         sensanas={
                   'ANOVA': OneWayAnova(),
-                  # Crashes for Yarik -- I guess openopt issue
-                  #'GPR_Model': GPRWeights(GPR(kernel=KernelLinear()), combiner=None),
-                  #
-                  # no I-RELIEF for now -- takes too long
                   'I-RELIEF': IterativeReliefOnline(),
                   # gimme more !!
                  }
@@ -280,3 +291,4 @@ if __name__ == '__main__':
 
     # and finally plot figure for channel of choice
     finalFigure(ds_pristine, ds, senses, 'Pz')
+

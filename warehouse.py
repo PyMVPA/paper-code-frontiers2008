@@ -7,12 +7,20 @@
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 
+__docformat__ = 'restructuredtext'
+
+# import the full PyMVPA suite
 from mvpa.suite import *
+
+# efficiently dump and load intermediate results
+import cPickle
+
+# report everything
+verbose.level = 100
+
 
 def doSensitivityAnalysis(ds, clfs, sensanas, splitter):
     """Generic function to perform sensitivity analysis (along classification)
-
-    To be used from EEG and MEG scripts.
 
     :Parameters:
       ds : Dataset
