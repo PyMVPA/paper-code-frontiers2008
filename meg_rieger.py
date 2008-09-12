@@ -1,31 +1,32 @@
 #!/usr/bin/python
 #emacs: -*- mode: python-mode; py-indent-offset: 4; indent-tabs-mode: nil -*-
 #ex: set sts=4 ts=4 sw=4 et:
+### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
+#
+#   See COPYING file distributed along with the PyMVPA package for the
+#   copyright and license terms.
+#
+### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 
-#
-# Main idea for MEG analysis example might be -- finding best wavelet component(s) providing
-# nice generalization
-#
+__docformat__ = 'restructuredtext'
 
 from mvpa.suite import *
 from warehouse import doSensitivityAnalysis
 
 if not locals().has_key('__IP'):
-    opt.verbose.default = 3                    # for now
+    # if not ran within IPython,
+    # parse cmdline options if given
     parser.add_options([opt.zscore, opt.do_sweep])
     parser.option_groups = [opts.common, opts.wavelet]
     (options, files) = parser.parse_args()
 else:
     class O(object): pass
     options = O()
-    options.wavelet_family = None #'db1'
-    options.wavelet_decomposition = 'dwp'
+    options.wavelet_family = None # 'db1'
+    options.wavelet_decomposition = 'dwt' # 'dwp'
     options.zscore = True
     options.do_sweep = False
 
-verbose.level = 4
-
-# set MVPA_PATHS_DATA_ROOT accordingly!
 datapath = cfg.get('paths', 'data root', default='data/meg.rieger')
 verbose(1, 'Datapath is %s' % datapath)
 
@@ -34,7 +35,9 @@ all_conditions = (('Correct Sure', 'cosu'),  ('Correct Unsure', 'cousu'),
 conditions = dict([all_conditions[0], all_conditions[2]])
 conditions_name = '-'.join(conditions.values())
 
+# subject to process
 subj = 'vp02'
+
 # sampling rate after preprocessing in Hz
 target_samplingrate = 80
 post_duration = 0.6
@@ -63,9 +66,7 @@ def loadData(subj):
                             t0=meg.timepoints[0]))
 
     # merge all datasets
-    dataset = datasets[0]
-    for d in datasets[1:]:
-        dataset += d
+    dataset = reduce(lambda x,y: x+y, datasets)     # combine into a single dataset
     # set uniq chunk id per each sample
     dataset.chunks = N.arange(dataset.nsamples)
 
@@ -74,12 +75,9 @@ def loadData(subj):
 
     # substract the baseline from the data; uses t0 to determine the length
     # of the baseline window
-    # XXX: shouldn't this be done per chunk?
     dataset.substractBaseline()
     verbose(2, 'Substracted %f sec baseline' % N.abs(dataset.t0))
 
-    # XXX shorten a bit please
-    #
     # select time window of interest: from onset to 600 ms after onset
     mask = dataset.mapper.getMask()
     # deselect timespoints prior to onset
@@ -93,35 +91,13 @@ def loadData(subj):
     verbose(2, 'Applied a-priori feature selection, ' \
                'leaving %i timepoints per channel' % dataset.mapper.dsshape[1])
 
-    # We might want to rechunk differently and coarsen the chunks
-    if True:
-        # arbitrarily group the sample into chunks
-        # done to make the cross-validation a bit quicker; using 10 chunks
-        # yields about the same performance as a full 'leave-really-only-a-
-        # single-sample-out cross-validation'
-        # samples are distributed, so that each chunk contains at least one
-        # of each condition
-        #nchunks = min(dataset.samplesperlabel.values())
-
-        # hmm, the code below does a better job than coarsenChunks, wrt to
-        # equalized distribution of samples....
-        nchunks = 8
-        for l in dataset.uniquelabels:
-            dataset.chunks[dataset.labels==l] = \
-                N.arange(N.sum(dataset.labels == l)) % nchunks
-
-    # If we decide to do searchlight, so we get 'generalization' per
-    # each time point after onset, using all sensors
-    #
-    #  POSTPONED
-    #
-    # dataset.mapper.setMetric(
-    #     DescreteMetric(elementsize=[1, 100],
-    #                    # distance function should be some custom one
-    #                    # to don't count different time points at all
-    #                    distance_function=cartesianDistance))
+    nchunks = 8
+    for l in dataset.uniquelabels:
+        dataset.chunks[dataset.labels==l] = \
+            N.arange(N.sum(dataset.labels == l)) % nchunks
 
     return dataset
+
 
 def preprocess(ds):
     """Additional preprocessing
@@ -142,29 +118,7 @@ def preprocess(ds):
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
         ds.labels_map = ds_orig.labels_map
 
-    verbose(1, 'Precondition data')
-    doZScore = True
-    if doZScore == True:
-        zscore(ds, perchunk=False)
-    else:
-        # Just divide by max value among first 33 sensors (34 and 91 seems to
-        # be bad, thus we need to exclude them)
-        ds.samples *= 1.0/N.max(N.abs(ds.O[:,:33,:]))
-    print ds.summary()
-
-    doSelectNFeaturesAnova = False
-    if doSelectNFeaturesAnova:
-        # For now lets just cheat and do on the whole ds, although it
-        # doesnt bias selection much (if at all) if later on we just do
-        # LOO testing (instead of coarse chunks)
-        verbose(1, 'Cruel feature selection')
-        ss = SensitivityBasedFeatureSelection(
-            OneWayAnova(),
-            FractionTailSelector(0.01, mode='select', tail='upper')
-            #FixedNElementTailSelector(2, mode='select', tail='upper')
-            )
-        ds = ss(ds)[0]
-        print ds.summary()
+    zscore(ds, perchunk=False)
 
     return ds
 
@@ -174,60 +128,16 @@ def clfSweep(ds):
     """
     # Test few classifiers
     best = {}
-    # libsvr never converges for some reason
-    # for clf in clfs['linear', '!lars', '!blr', '!libsvr', '!meta']:
-    for clf in [sg.SVM(kernel_type='linear')]:
-        # C=-2.0 gives 84% when properly scaled and 5% ANOVA voxels
-        # C=-1.0 and RFE gives up to 85% correct
-        # clf = sg.SVM(kernel_type='linear')
-        C = -2.0
-
-        # Scale C according  to the number of samples per class
-        spl = ds.samplesperlabel
-        ratio = N.sqrt(float(spl[0])/spl[1])
-        clf.C = (C/ratio, C*ratio)
-
-        #
-        # Two flavors of RFE:
-        #
-        # This classifier will do RFE while taking transfer error to testing
-        # set of that split. Resultant classifier is voted classifier on top
-        # of all splits, let see what that would do ;-)
-        #rfesvm = sg.SVM(kernel_type='linear')
-        #rfesvm.C = clf.C
-        #clf = \
-        #  SplitClassifier(                      # which does splitting internally
-        #   FeatureSelectionClassifier(
-        #    clf = clf,
-        #    feature_selection = RFE(             # on features selected via RFE
-        #        sensitivity_analyzer=\
-        #            rfesvm.getSensitivityAnalyzer(transformer=Absolute),
-        #        transfer_error=TransferError(rfesvm),
-        #        stopping_criterion=FixedErrorThresholdStopCrit(0.05),
-        #        feature_selector=FractionTailSelector(
-        #                           0.2, mode='discard', tail='lower'),
-        #                           # remove 20% of features at each step
-        #        update_sensitivity=True)),
-        #        # update sensitivity at each step
-        #    descr='LinSVM+RFE(N-Fold)')
-
-        #rfesvm_split = SplitClassifier(rfesvm)
-        #clf = FeatureSelectionClassifier(
-        # clf = clf,
-        # feature_selection = RFE(             # on features selected via RFE
-        #     # based on sensitivity of a clf which does splitting internally
-        #     sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
-        #         transformer=Absolute),
-        #     transfer_error=ConfusionBasedError(
-        #        rfesvm_split,
-        #        confusion_state="confusion"),
-        #        # and whose internal error we use
-        #     feature_selector=FractionTailSelector(
-        #                        0.2, mode='discard', tail='lower'),
-        #                        # remove 20% of features at each step
-        #     update_sensitivity=True),
-        #     # update sensitivity at each step
-        # descr='LinSVM+RFE(splits_avg, static)' )
+    for clf in clfs['linear']:
+        try:
+            # ballance via C if possible
+            C = -2.0
+            # Scale C according  to the number of samples per class
+            spl = ds.samplesperlabel
+            ratio = N.sqrt(float(spl[0])/spl[1])
+            clf.C = (C/ratio, C*ratio)
+        except:
+            pass
 
         cv2A = CrossValidatedTransferError(
                   TransferError(clf),
@@ -240,8 +150,12 @@ def clfSweep(ds):
         if best.get('2A', (100, None, None))[0] > error2A:
             best['2A'] = (error2A, cv2A.confusion, clf.descr)
 
-        # assign original single C
-        clf.C = C
+        try:
+            # assign original single C
+            clf.C = C
+        except:
+            pass
+
         # to get results from Figure2B
         cv2B = CrossValidatedTransferError(
                   TransferError(clf),
@@ -268,13 +182,8 @@ def analysis(ds):
     # Lets first replicate the obtained resuls.  We can do slightly
     # better using RFEs and initial feature selection, but lets just
     # replicate
-    #
     clf = sg.SVM(kernel_type='linear')
-    # C=-2.0 gives 84% when properly scaled and 5% ANOVA voxels
-    # C=-1.0 and RFE gives up to 85% correct
-    # clf = sg.SVM(kernel_type='linear')
     C = -2.0
-
     # Scale C according  to the number of samples per class
     spl = ds.samplesperlabel
     ratio = N.sqrt(float(spl[0])/spl[1])
@@ -292,59 +201,15 @@ def analysis(ds):
     # error2A = cv2A(ds)
     # verbose(2, "Figure 2A LOO performance:\n%s" % cv2A.confusion)
 
-    # Used in RFE implementations
-    rfesvm = sg.SVM(kernel_type='linear')
-    rfesvm2 = sg.SVM(kernel_type='linear')
-    rfesvm.C = clf.C
-    rfesvm2.C = clf.C
-    rfesvm_split = SplitClassifier(rfesvm2)
     clfs = {
         # explicitly instruct SMLR just to fit a single set of weights for our
         # binary task
         'SMLR': SMLR(lm=1.0, fit_all_weights=False),
         'lCSVM': clf,
-        #'lGPR': GPR(kernel=KernelLinear()),
-        #'lCSVM+RFE(farm)': SplitClassifier( # which does splitting internally
-        #   FeatureSelectionClassifier(
-        #    clf = clf,
-        #    feature_selection = RFE(             # on features selected via RFE
-        #        sensitivity_analyzer=\
-        #            rfesvm.getSensitivityAnalyzer(transformer=Absolute),
-        #        transfer_error=TransferError(rfesvm),
-        #        stopping_criterion=FixedErrorThresholdStopCrit(0.05),
-        #        feature_selector=FractionTailSelector(
-        #                           0.2, mode='discard', tail='lower'),
-        #                           # remove 20% of features at each step
-        #        update_sensitivity=True)),
-        #        # update sensitivity at each step
-        #    descr='LinSVM+RFE(farm,N-Fold)'),
-        #'lCSVM+RFE(mean)': FeatureSelectionClassifier(
-        #  clf = clf,
-        #  feature_selection = RFE(             # on features selected via RFE
-        #    # based on sensitivity of a clf which does splitting internally
-        #    sensitivity_analyzer=rfesvm_split.getSensitivityAnalyzer(
-        #        transformer=Absolute),
-        #    transfer_error=ConfusionBasedError(
-        #       rfesvm_split, confusion_state="confusion"),
-        #       # and whose internal error we use
-        #    feature_selector=FractionTailSelector(
-        #                       0.2, mode='discard', tail='lower'),
-        #                       # remove 20% of features at each step
-        #    update_sensitivity=True),
-        #    # update sensitivity at each step
-        #  descr='LinSVM+RFE(avg,N-Fold)' )
         }
 
     # define some pure sensitivities (or related measures)
-    sensanas={
-        'ANOVA': OneWayAnova(),
-        # Crashes for Yarik -- I guess openopt issue
-        #'GPR_Model': GPRWeights(GPR(kernel=KernelLinear()), combiner=None),
-        #
-        # no I-RELIEF for now -- takes too long
-        #'I-RELIEF': IterativeReliefOnline(),
-        # gimme more !!
-        }
+    sensanas={'ANOVA': OneWayAnova()}
 
     # perform the analysis and get all sensitivities
     senses = doSensitivityAnalysis(ds, clfs, sensanas, NFoldSplitter())
@@ -364,7 +229,6 @@ def analysis(ds):
 
     verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
 
-    # Sure we repeat ourselves here but for the sake of clarity
     return senses
 
 
@@ -374,13 +238,11 @@ def finalFigure(ds_pristine, ds, senses, channel,
     """
     SR = ds_pristine.samplingrate
     # data is already trials, this would correspond sec before onset
-    pre_onset = -(int(ds_pristine.t0*100)/100.0)   # round to 2 digits
+    pre_onset = N.abs(ds_pristine.t0)
     pre = 0.05
     # number of channels, samples per trial
     nchannels, spt = ds_pristine.mapper.mask.shape
-    # compute seconds in trials after onset
-    #post = post_duration
-    post = 0.41 #post_duration
+    post = 0.4 #post_duration
 
     # index of the channel of interest
     ch_of_interest = ds_pristine.channelids.index(channel)
@@ -399,18 +261,16 @@ def finalFigure(ds_pristine, ds, senses, channel,
     responses = [ ds_pristine['labels', i].O[:, ch_of_interest, :] * 1e15
                   for i in [0, 1] ]
 
-    # TODO: move inside dataset
+    # TODO: move inside dataset API
     labels_map_rev = dict([reversed(x) for x in ds.labels_map.iteritems()])
 
     for l in ds_pristine.UL:
         plots.append({'label': labels_map_rev[l].tostring(),
                       'data' : responses[l], 'color': colors[l]})
 
-    plots.append({'label': 'dwave',
-                 'data':  N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
-                                  ndmin=2),
-                 'color': colors[2],
-                 'pre_mean': 0})
+    plots.append({'label': 'dwave', 'color': colors[2], 'pre_mean': 0,
+                  'data':  N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
+                                   ndmin=2)})
 
     plotERPs( plots,
               pre=pre, pre_onset=pre_onset,
@@ -442,18 +302,15 @@ def finalFigure(ds_pristine, ds, senses, channel,
         # take one channel: yields (nfolds x ntimepoints)
         ch_sens = backproj[:, ch_of_interest, :]
 
-        # sign of sensitivities is more or less arbitrary, but when flipped
-        # to have to big bump in the middle on the positive side, they all
-        # really look like the diff wave -- maybe need some better
-        # justification ;-)
+        # sign of sensitivities is up to classifier relabling of the
+        # input classes.
+        # TODO: make it explicit, for now judge by the mean and flip
+        #       if needed
         if ch_sens.mean() < 0:
             ch_sens *= -1
 
         # charge ERP definition
-        erp_cfgs.append(
-            {'label': sens_id,
-             'color': colors[i],
-             'data' : ch_sens})
+        erp_cfgs.append( {'label': sens_id, 'color': colors[i], 'data' : ch_sens})
 
     # just ci95 error here, due to the low number of folds not much different
     # from std; also do _not_ demean based on initial baseline as we want the
@@ -465,8 +322,8 @@ def finalFigure(ds_pristine, ds, senses, channel,
 
     P.legend(sens_labels)
 
-
     return fig
+
 
 if __name__ == '__main__':
     # load the only subject that we have
@@ -480,7 +337,7 @@ if __name__ == '__main__':
     else:
         senses = analysis(ds)
 
-        # Draw per interesting channel
+        # Draw few interesting channels
         for c in ['MRO22', 'MRO32', 'MZO01']:
             fig = finalFigure(ds_pristine, ds, senses, c)
             fig.savefig('figs/meg_rieger-%s-%s.svg' % (conditions_name, c))
@@ -495,4 +352,4 @@ if __name__ == '__main__':
         P.draw()
         fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.svg' % (conditions_name))
         fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.png' % (conditions_name), dpi=90)
- 
+

@@ -130,10 +130,10 @@ def finalFigure(ds_pristine, ds, senses, channel):
         # take one channel: yields (nfolds x ntimepoints)
         ch_sens = backproj[:, ch_of_interest, :]
 
-        # sign of sensitivities is more or less arbitrary, but when flipped
-        # to have to big bump in the middle on the positive side, they all
-        # really look like the diff wave -- maybe need some better
-        # justification ;-)
+        # sign of sensitivities is up to classifier relabling of the
+        # input classes.
+        # TODO: make it explicit, for now judge by the mean and flip
+        #       if needed
         if ch_sens.mean() < 0:
             ch_sens *= -1
 
