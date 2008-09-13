@@ -16,7 +16,7 @@ from warehouse import doSensitivityAnalysis
 if not locals().has_key('__IP'):
     # if not ran within IPython,
     # parse cmdline options if given
-    parser.add_options([opt.zscore, opt.do_sweep])
+    parser.add_options([opt.zscore])
     parser.option_groups = [opts.common, opts.wavelet]
     (options, files) = parser.parse_args()
 else:
@@ -25,7 +25,6 @@ else:
     options.wavelet_family = None # 'db1'
     options.wavelet_decomposition = 'dwt' # 'dwp'
     options.zscore = True
-    options.do_sweep = False
 
 datapath = cfg.get('paths', 'data root', default='data/meg.rieger')
 verbose(1, 'Datapath is %s' % datapath)
@@ -66,7 +65,7 @@ def loadData(subj):
                             t0=meg.timepoints[0]))
 
     # merge all datasets
-    dataset = reduce(lambda x,y: x+y, datasets)     # combine into a single dataset
+    dataset = reduce(lambda x,y: x+y, datasets)
     # set uniq chunk id per each sample
     dataset.chunks = N.arange(dataset.nsamples)
 
@@ -83,7 +82,8 @@ def loadData(subj):
     # deselect timespoints prior to onset
     mask[:, :int(N.round(-dataset.t0 * dataset.samplingrate))] = False
     # deselect timepoints after 600 ms after onset
-    mask[:, int(N.round((-dataset.t0 + post_duration) * dataset.samplingrate)):] = False
+    mask[:, int(N.round((-dataset.t0 + post_duration)
+                        * dataset.samplingrate)):] = False
     # finally transform into feature selection list
     mask = dataset.mapForward(mask).nonzero()[0]
     # and apply selection
@@ -123,67 +123,12 @@ def preprocess(ds):
     return ds
 
 
-def clfSweep(ds):
-    """Test various classifiers
-    """
-    # Test few classifiers
-    best = {}
-    for clf in clfs['linear']:
-        try:
-            # ballance via C if possible
-            C = -2.0
-            # Scale C according  to the number of samples per class
-            spl = ds.samplesperlabel
-            ratio = N.sqrt(float(spl[0])/spl[1])
-            clf.C = (C/ratio, C*ratio)
-        except:
-            pass
-
-        cv2A = CrossValidatedTransferError(
-                  TransferError(clf),
-                  NFoldSplitter(),
-                  enable_states=['confusion', 'training_confusion', 'splits'])
-
-        verbose(1, "Running cross-validation on %s" % clf.descr)
-        error2A = cv2A(ds)
-        verbose(2, "Figure 2A LOO performance:\n%s" % cv2A.confusion)
-        if best.get('2A', (100, None, None))[0] > error2A:
-            best['2A'] = (error2A, cv2A.confusion, clf.descr)
-
-        try:
-            # assign original single C
-            clf.C = C
-        except:
-            pass
-
-        # to get results from Figure2B
-        cv2B = CrossValidatedTransferError(
-                  TransferError(clf),
-                  NFoldSplitter(nperlabel='equal',
-                                # increase to reasonable number
-                                nrunspersplit=4),
-                  enable_states=['confusion', 'training_confusion'])
-
-        error2B = cv2B(ds)
-
-        verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
-        if best.get('2B', (100, None, None))[0] > error2B:
-            best['2B'] = (error2B, cv2B.confusion, clf.descr)
-
-
-    verbose(1, "Best result for 2A was %g achieved on %s, and for 2B " \
-            "was %g achieved using %s" %
-            (best['2A'][0], best['2A'][2],
-             best['2B'][0], best['2B'][2]))
-
-
 def analysis(ds):
-
-    # Lets first replicate the obtained resuls.  We can do slightly
+    # Lets replicate published obtained resuls.  We can do slightly
     # better using RFEs and initial feature selection, but lets just
-    # replicate
+    # replicate for the purpose of the paper
     clf = sg.SVM(kernel_type='linear')
-    C = -2.0
+    C = -2.0 # our default scaling is too soft
     # Scale C according  to the number of samples per class
     spl = ds.samplesperlabel
     ratio = N.sqrt(float(spl[0])/spl[1])
@@ -242,13 +187,10 @@ def finalFigure(ds_pristine, ds, senses, channel,
     pre = 0.05
     # number of channels, samples per trial
     nchannels, spt = ds_pristine.mapper.mask.shape
-    post = 0.4 #post_duration
+    post = 0.4
 
     # index of the channel of interest
     ch_of_interest = ds_pristine.channelids.index(channel)
-
-    # error type to use in all plots
-    errtype=['std', 'ci95']
 
     if fig is None:
         fig = P.figure(facecolor='white', figsize=(12, 6))
@@ -268,17 +210,16 @@ def finalFigure(ds_pristine, ds, senses, channel,
         plots.append({'label': labels_map_rev[l].tostring(),
                       'data' : responses[l], 'color': colors[l]})
 
-    plots.append({'label': 'dwave', 'color': colors[2], 'pre_mean': 0,
-                  'data':  N.array(responses[0].mean(axis=0) - responses[1].mean(axis=0),
-                                   ndmin=2)})
+    plots.append(
+        {'label': 'dwave', 'color': colors[2], 'pre_mean': 0,
+         'data':  N.array(responses[0].mean(axis=0)
+                          - responses[1].mean(axis=0), ndmin=2)})
 
     plotERPs( plots,
               pre=pre, pre_onset=pre_onset,
-              pre_mean=pre, post=post, SR=SR, ax=ax, errtype=errtype,
+              pre_mean=pre, post=post, SR=SR, ax=ax, errtype=['std', 'ci95'],
               ylim=(-500, 300), ylabel='fT', ylformat='%.1f',
-              xlabel=None,
-              #xlabel='Time(s)',
-              legend=True)
+              xlabel=None, legend=True)
 
     P.title(channel)
     # plot sensitivities
@@ -288,7 +229,8 @@ def finalFigure(ds_pristine, ds, senses, channel,
     erp_cfgs = []
     colors = ['red', 'green', 'blue', 'cyan', 'magenta']
 
-    for i, (sens_id, sens) in enumerate(senses[::-1]):
+    for i, sens_ in enumerate(senses[::-1]):
+        (sens_id, sens) = sens_[:2]
         sens_labels.append(sens_id)
         # back-project
         backproj = ds.mapReverse(sens)
@@ -309,8 +251,9 @@ def finalFigure(ds_pristine, ds, senses, channel,
         if ch_sens.mean() < 0:
             ch_sens *= -1
 
-        # charge ERP definition
-        erp_cfgs.append( {'label': sens_id, 'color': colors[i], 'data' : ch_sens})
+        # charge plot definition
+        erp_cfgs.append(
+            {'label': sens_id, 'color': colors[i], 'data' : ch_sens})
 
     # just ci95 error here, due to the low number of folds not much different
     # from std; also do _not_ demean based on initial baseline as we want the
@@ -332,24 +275,21 @@ if __name__ == '__main__':
     ds_pristine = ds.copy()
     print ds.summary()
     ds = preprocess(ds)
-    if options.do_sweep:
-        clfSweep(ds)
-    else:
-        senses = analysis(ds)
+    senses = analysis(ds)
 
-        # Draw few interesting channels
-        for c in ['MRO22', 'MRO32', 'MZO01']:
-            fig = finalFigure(ds_pristine, ds, senses, c)
-            fig.savefig('figs/meg_rieger-%s-%s.svg' % (conditions_name, c))
-            fig.savefig('figs/meg_rieger-%s-%s.png' % (conditions_name, c), dpi=90)
-            P.close(fig)
+    # Draw few interesting channels
+    for c in ['MRO22', 'MRO32', 'MZO01']:
+        fig = finalFigure(ds_pristine, ds, senses, c)
+        fig.savefig('figs/meg_rieger-%s-%s.svg' % (conditions_name, c))
+        fig.savefig('figs/meg_rieger-%s-%s.png' % (conditions_name, c), dpi=90)
+        P.close(fig)
 
-        # Draw combined for two interesting channels
-        fig = P.figure(figsize=(10,5), facecolor='white')
-        finalFigure(ds_pristine, ds, senses, 'MRO22', fig, 2, 2, 1, 3)
-        finalFigure(ds_pristine, ds, senses, 'MZO01', fig, 2, 2, 2, 4)
-        fig.subplots_adjust(left=0.01, right=0.99, bottom=0.05, wspace=0.01)
-        P.draw()
-        fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.svg' % (conditions_name))
-        fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.png' % (conditions_name), dpi=90)
+    # Draw combined for two interesting channels
+    fig = P.figure(figsize=(10,5), facecolor='white')
+    finalFigure(ds_pristine, ds, senses, 'MRO22', fig, 2, 2, 1, 3)
+    finalFigure(ds_pristine, ds, senses, 'MZO01', fig, 2, 2, 2, 4)
+    fig.subplots_adjust(left=0.01, right=0.99, bottom=0.05, wspace=0.01)
+    P.draw()
+    fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.svg' % (conditions_name))
+    fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.png' % (conditions_name), dpi=90)
 
