@@ -7,12 +7,27 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
+"""
+This file contains the MEG specific source code of an analysis done for
+the paper
+
+  "PyMVPA: A Unifying Approach to the Analysis of Neuroscientific Data"
+
+in the special issue 'Python in Neuroscience' of the journal 'Frontiers
+in Neuroinformatics'.
+
+Note, that it uses a classifier provided by the Shogun toolbox and therefore
+its Python bindings have to be available.
+"""
+
 
 __docformat__ = 'restructuredtext'
 
 from mvpa.suite import *
 from warehouse import doSensitivityAnalysis
 
+
+# MH: IMHO this has to go.
 if not locals().has_key('__IP'):
     # if not ran within IPython,
     # parse cmdline options if given
@@ -26,24 +41,40 @@ else:
     options.wavelet_decomposition = 'dwt' # 'dwp'
     options.zscore = True
 
+
+# configure the data source directory
 datapath = cfg.get('paths', 'data root', default='data/meg.rieger')
 verbose(1, 'Datapath is %s' % datapath)
 
+# map several condition labels
 all_conditions = (('Correct Sure', 'cosu'),  ('Correct Unsure', 'cousu'),
                   ('False Unsure', 'fausu'), ('False Sure', 'fasu'))
 conditions = dict([all_conditions[0], all_conditions[2]])
 conditions_name = '-'.join(conditions.values())
 
-# subject to process
+# use a single subject for this analysis
 subj = 'vp02'
+
 
 # sampling rate after preprocessing in Hz
 target_samplingrate = 80
+# time window of interest after stimulus onset (in sec)
 post_duration = 0.6
 
+
 def loadData(subj):
+    """Load data for one subject and return dataset.
+
+    :Parameter:
+      subj: str
+        ID of the subject who's data should be loaded.
+
+    :Returns:
+      ChannelDataset instance.
+    """
     datasets = []
 
+    # load samples for each condition from individual files
     for cond_id, cond in conditions.iteritems():
         verbose(1, 'Loading data for condition %s:%s' % (cond, cond_id))
         # for now just with tiny dataset
@@ -58,6 +89,7 @@ def loadData(subj):
 
         verbose(2, 'Selected %i channels' % data.shape[1])
 
+        # instanciate dataset and add to list
         datasets.append(ChannelDataset(samples=data,
                             labels=[cond_id] * len(data),
                             labels_map=True,
@@ -69,6 +101,7 @@ def loadData(subj):
     # set uniq chunk id per each sample
     dataset.chunks = N.arange(dataset.nsamples)
 
+    # apply fourier resampling
     dataset = dataset.resample(sr=target_samplingrate)
     verbose(2, 'Downsampled data to %.1f Hz' % dataset.samplingrate)
 
@@ -91,6 +124,8 @@ def loadData(subj):
     verbose(2, 'Applied a-priori feature selection, ' \
                'leaving %i timepoints per channel' % dataset.mapper.dsshape[1])
 
+    # group all samples into 8 chunks, while maintaining the ratio between
+    # the two categories in each chunk
     nchunks = 8
     for l in dataset.uniquelabels:
         dataset.chunks[dataset.labels==l] = \
@@ -101,6 +136,12 @@ def loadData(subj):
 
 def preprocess(ds):
     """Additional preprocessing
+
+    :Parameters:
+      ds: Dataset
+
+    :Returns:
+      Preprocessed Dataset
     """
     if options.wavelet_family is not None:
         verbose(2, "Converting into wavelets family %s."
@@ -118,12 +159,21 @@ def preprocess(ds):
         ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
         ds.labels_map = ds_orig.labels_map
 
+    # normalize
     zscore(ds, perchunk=False)
 
     return ds
 
 
 def analysis(ds):
+    """Performs main analysis.
+
+    :Parameter:
+      ds: Dataset
+
+    :Returns:
+      Per measure sensitivities as returned from doSensitivityAnalysis()
+    """
     # Lets replicate published obtained results.  We can do slightly
     # better using RFEs and initial feature selection, but lets just
     # replicate for the purpose of the paper
@@ -169,8 +219,10 @@ def analysis(ds):
                             nrunspersplit=100),
               enable_states=['confusion', 'training_confusion'])
 
+    # compute
     error2B = cv2B(ds)
 
+    # print full testing confusion table
     verbose(2, "Figure 2B LOO performance:\n%s" % cv2B.confusion)
 
     return senses
@@ -202,7 +254,7 @@ def finalFigure(ds_pristine, ds, senses, channel,
     responses = [ ds_pristine['labels', i].O[:, ch_of_interest, :] * 1e15
                   for i in [0, 1] ]
 
-    # TODO: move inside dataset API
+    # reverse map from numerical to literal labels
     labels_map_rev = dict([reversed(x) for x in ds.labels_map.iteritems()])
 
     for l in ds_pristine.UL:
@@ -245,8 +297,6 @@ def finalFigure(ds_pristine, ds, senses, channel,
 
         # sign of sensitivities is up to classifier relabling of the
         # input classes.
-        # TODO: make it explicit, for now judge by the mean and flip
-        #       if needed
         if ch_sens.mean() < 0:
             ch_sens *= -1
 
@@ -271,9 +321,13 @@ if __name__ == '__main__':
     # load the only subject that we have
     verbose(1, 'Loading data for subject: ' + subj)
     ds = loadData(subj)
+    # keep copy of untransform dataset for visualization later on
     ds_pristine = ds.copy()
+    # give status output
     print ds.summary()
     ds = preprocess(ds)
+
+    # perform main analysis
     senses = analysis(ds)
 
     # Draw few interesting channels
@@ -291,4 +345,3 @@ if __name__ == '__main__':
     P.draw()
     fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.svg' % (conditions_name))
     fig.savefig('figs/meg_rieger-%s-MRO22+MZO01.png' % (conditions_name), dpi=90)
-
