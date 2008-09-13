@@ -15,6 +15,9 @@ the paper
 
 in the special issue 'Python in Neuroscience' of the journal 'Frontiers
 in Neuroinformatics'.
+
+Note, that the dendrogram plots require a recent version of matplotlib
+(tested with 0.98.3).
 """
 
 __docformat__ = 'restructuredtext'
@@ -85,7 +88,11 @@ def makeFinalFigure(ds, senses, atlas_ids, atlas_map):
         ROI codes of the selected ROIs
       atlas_map: 1D vector (nfeatures)
         Vector with atlas ROI indeces.
+    :Returns:
+      Matplotlib figure handler
     """
+    fig = P.figure(figsize=(4,7))
+
     # store axes of all subplots for uniform scaling  later on
     axes = []
 
@@ -121,6 +128,8 @@ def makeFinalFigure(ds, senses, atlas_ids, atlas_map):
 
     for ax in axes:
         ax.set_ylim((0, ymax))
+
+    return fig
 
 
 def plotAtlasROISampleDistanceDendrogram(ds, sens, atlas_id, atlas_map,
@@ -219,6 +228,9 @@ def plotROISensitivityScores(sens_scores, nmin_rois, nmax_rois, ranks):
         Number of highest ranked ROIs to plot (on the left)
       ranks: dict
         Highest sensitivity score of *any* sensitivity per ROI.
+
+    :Returns:
+      Matplotlib figure handler.
     """
     # determine highest and lowest scoring ROIs
     max_rank = sorted([(k, max(v)) for k, v in ranks.iteritems()],
@@ -234,6 +246,8 @@ def plotROISensitivityScores(sens_scores, nmin_rois, nmax_rois, ranks):
     bar_width = 0.3333
     bar_offset = bar_width
     colors = ['0.3', '0.7']
+
+    fig = P.figure(facecolor='white', figsize=(12, 6))
 
     # plot for all sensitivities
     max_val = 0
@@ -263,6 +277,10 @@ def plotROISensitivityScores(sens_scores, nmin_rois, nmax_rois, ranks):
     labels = P.gca().get_xticklabels()
     # rotate labels
     P.setp(labels, rotation=90)
+
+    P.ylabel('L1-normed sensitivities')
+
+    return fig
 
 
 def loadData(subj):
@@ -392,11 +410,10 @@ if __name__ == '__main__':
 
     # generate figure with ROI-wise sensitivity scores for the 20 highest and 3
     # lowest scoring ROIs
-    P.figure()
-    plotROISensitivityScores(sens_scores, 3, 20, rank)
-    P.ylabel('L1-normed sensitivities')
+    fig_roiscores = plotROISensitivityScores(sens_scores, 3, 20, rank)
 
     # generate figure with cluster dendrograms for four exemplary ROIs
-    P.figure(figsize=(4,7))
-    makeFinalFigure(ds, senses, [39, 1, 21, 9], atlas_mask)
+    fig_dendro = makeFinalFigure(ds, senses, [39, 1, 21, 9], atlas_mask)
 
+    # figures might now be saved into SVG format or simply shown for interactive
+    # data exploration
