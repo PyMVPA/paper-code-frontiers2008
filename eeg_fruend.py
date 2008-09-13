@@ -10,10 +10,8 @@
 
 __docformat__ = 'restructuredtext'
 
-
 # import functionality, common to all analyses
 from warehouse import *
-
 
 # configure the data source directory
 datapath = os.path.join(cfg.get('paths', 'data root', default='data'),
@@ -148,7 +146,8 @@ def finalFigure(ds_pristine, ds, senses, channel):
     colors = ['red', 'green', 'blue', 'cyan', 'magenta']
 
     # for all available sensitivities
-    for i, (sens_id, sens) in enumerate(senses[::-1]):
+    for i, sens_ in enumerate(senses[::-1]):
+        (sens_id, sens) = sens_[:2]
         sens_labels.append(sens_id)
         # back-project into electrode space
         backproj = ds.mapReverse(sens)
@@ -168,10 +167,7 @@ def finalFigure(ds_pristine, ds, senses, channel):
             ch_sens *= -1
 
         # charge ERP definition
-        erp_cfgs.append(
-            {'label': sens_id,
-             'color': colors[i],
-             'data' : ch_sens})
+        erp_cfgs.append({'label': sens_id, 'color': colors[i], 'data': ch_sens})
 
     # just ci95 error here, due to the low number of folds not much different
     # from std; also do _not_ demean based on initial baseline as we want the
@@ -182,6 +178,13 @@ def finalFigure(ds_pristine, ds, senses, channel):
     # add a legend to the figure
     P.legend(sens_labels)
 
+    return fig
+
+
+def topoFigure(ds, senses):
+    """Plot topographies of given sensitivities
+    """
+
     # how many sensitivities do we have
     nsens = len(senses)
 
@@ -189,7 +192,8 @@ def finalFigure(ds_pristine, ds, senses, channel):
     fig = P.figure(facecolor='white', figsize=((nsens+1)*3, 4))
 
     # again for all available sensitvities
-    for i, (sens_id, sens) in enumerate(senses):
+    for i, sens_ in enumerate(senses):
+        (sens_id, sens) = sens_[:2]
         ax = fig.add_subplot(1, nsens+1, i+1, frame_on=False)
         # back-project: yields (nfolds x nchannels x ntimepoints)
         backproj = ds.mapReverse(sens)
@@ -230,6 +234,8 @@ def finalFigure(ds_pristine, ds, senses, channel):
     fig.subplots_adjust(left=0.06, right=1.05, bottom=0.01, wspace=-0.2)
     P.show()
 
+    return fig
+
 
 if __name__ == '__main__':
     # load dataset for some subject
@@ -251,10 +257,8 @@ if __name__ == '__main__':
     # print short summary to give confidence ;-)
     print ds.summary()
 
-    do_zscore = True
-    if do_zscore:
-        verbose(1, 'Z-scoring')
-        zscore(ds, perchunk=True)
+    verbose(1, 'Z-scoring')
+    zscore(ds, perchunk=True)
     print ds.summary()
 
     do_analyses = True
@@ -272,7 +276,6 @@ if __name__ == '__main__':
         sensanas={
                   'ANOVA': OneWayAnova(),
                   'I-RELIEF': IterativeReliefOnline(),
-                  # gimme more !!
                  }
         # perform the analysis and get all sensitivities
         senses = doSensitivityAnalysis(ds, clfs, sensanas, NFoldSplitter())
@@ -289,6 +292,8 @@ if __name__ == '__main__':
     # (re)get pristine dataset for plotting of ERPs
     ds_pristine=loadData(subj)
 
-    # and finally plot figure for channel of choice
-    finalFigure(ds_pristine, ds, senses, 'Pz')
+    # plot figure for channel of choice
+    fig_sens = finalFigure(ds_pristine, ds, senses, 'Pz')
 
+    # plot figure for topographies
+    fig_topo = topoFigure(ds, senses)
