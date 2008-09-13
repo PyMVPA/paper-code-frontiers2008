@@ -162,11 +162,11 @@ def analysis(ds):
     # assign original single C
     clf.C = C
     # get results from Figure2B with resampling of the samples to
-    # ballance number of samples per label
+    # balance number of samples per label
     cv2B = CrossValidatedTransferError(
               TransferError(clf),
               NFoldSplitter(nperlabel='equal',
-                            nrunspersplit=20),
+                            nrunspersplit=100),
               enable_states=['confusion', 'training_confusion'])
 
     error2B = cv2B(ds)
