@@ -7,16 +7,28 @@
 #   copyright and license terms.
 #
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
-"""Simply functors that transform something."""
+"""
+This file contains the cell-recordings specific source code of an analysis
+done for the paper
+
+  "PyMVPA: A Unifying Approach to the Analysis of Neuroscientific Data"
+
+in the special issue 'Python in Neuroscience' of the journal 'Frontiers
+in Neuroinformatics'.
+"""
 
 __docformat__ = 'restructuredtext'
 
+# import functionality, common to all analyses
 from warehouse import *
+
 # To read .mat files with data
 from scipy.io import loadmat
 
 import os.path
 
+
+# MH: IMHO should go as a whole
 if not locals().has_key('__IP'):
     # If not within IPython
     opt.do_lfp = \
@@ -33,15 +45,22 @@ else:
     options = O()
     options.wavelet_family = None
     options.wavelet_decomposition = 'dwt'
-    options.zscore = True # XXX ?
+    options.zscore = True
     options.do_lfp = False
 
 
+# configure the data source directory
 datapath = os.path.join(cfg.get('paths', 'data root', default='../data'),
                         'cell.luczak/')
 verbose(1, 'Datapath is %s' % datapath)
 
+
 def loadData():
+    """Load experimental data from fixed .mat file.
+
+    :Returns:
+      MaskedDataset instance.
+    """
     # Both lfp and spike counts share the same labels which are
     # stored only in counts datafile. So we need to load both
     filepath = datapath + 'AL22_psth400.mat'
@@ -60,16 +79,26 @@ def loadData():
     d = MaskedDataset(samples=samples, labels=labels)
     # assign descriptions (mapping) of the numerical labels
     tones = (3, 7, 12, 20, 30)
+    # assign mapping to literal labels
     d.labels_map = dict(
         [('%dkHz' % (tones[i]), i+38) for i in xrange(43-38)] +
         [('song%d' % (i+1), i+43) for i in xrange(48-43)])
 
-    coarsenChunks(d, nchunks=8)         # lets split into 8 chunks
+    # lets split into 8 chunks
+    coarsenChunks(d, nchunks=8)
 
     return d
 
 
 def preprocess(ds):
+    """Performs additional preprocessing.
+
+    :Parameter:
+      ds: Dataset
+
+    :Returns:
+      Preprocessed dataset
+    """
     # If we were provided wavelet family to use
     if options.wavelet_family not in ['-1', None]:
         verbose(2, "Converting into wavelets family %s."
@@ -93,6 +122,7 @@ def preprocess(ds):
         verbose(2, "Z-scoring full dataset")
         zscore(ds, perchunk=False)
 
+    # constant feature are not informative
     nf_orig = ds.nfeatures
     ds = removeInvariantFeatures(ds)
     verbose(2, "Removed invariant features. Got %d out of %d features"
@@ -102,6 +132,14 @@ def preprocess(ds):
 
 
 def analysis(ds):
+    """Performs main analysis.
+
+    :Parameter:
+      ds: Dataset
+
+    :Returns:
+      Per measure sensitivities as returned from doSensitivityAnalysis()
+    """
     verbose(1, "Running generic pipeline")
     senses = doSensitivityAnalysis(
         ds, {'SMLR': SMLR(descr='SMLR(defaults)')}, {}, NFoldSplitter(),
@@ -127,6 +165,14 @@ def limshow(data, ax=None, cmap=P.cm.jet, *args, **kwargs):
 
 
 def finalFigure(senses):
+    """Compose the final figure.
+
+    :Parameter:
+      senses: return value of `analysis()`
+
+    :Returns:
+      Matplotlib figure handler.
+    """
     # Create  a custom colormap
     RdBu_rev = inverseCmap('RdBu')
 
@@ -198,10 +244,15 @@ def finalFigure(senses):
 
 
 if __name__ == '__main__':
+    # load data from hardcoded file
     ds = loadData()
     verbose(1, "Dataset for processing summary:\n%s" % ds.summary())
     ds = preprocess(ds)
+
+    # this is the main analysis
     confusion, senses = analysis(ds)
+
+    # rest is plotting
     P.figure()
     fig, im, cb = confusion.plot(
         labels=("3kHz","7kHz","12kHz","20kHz","30kHz", None,
@@ -209,5 +260,3 @@ if __name__ == '__main__':
     fig.savefig('figs/cell_luczak-confusion.svg')
     fig = finalFigure(senses)
     fig.savefig('figs/cell_luczak-sens.svg')
-
-
