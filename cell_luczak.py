@@ -11,26 +11,21 @@
 
 __docformat__ = 'restructuredtext'
 
-import matplotlib as mpl
-
-from mvpa.suite import *
+from warehouse import *
+# To read .mat files with data
 from scipy.io import loadmat
-
-# Create  a custom colormap
-from warehouse import inverseCmap
-RdBu_rev = inverseCmap('RdBu')
 
 import os.path
 
 if not locals().has_key('__IP'):
+    # If not within IPython
     opt.do_lfp = \
                  Option("--lfp",
                         action="store_true", dest="do_lfp",
                         default=False,
                         help="Either to process LFP instead of spike counts")
 
-    opt.verbose.default=2                    # for now
-    parser.add_options([opt.zscore, opt.do_lfp, opt.do_sweep])
+    parser.add_options([opt.zscore, opt.do_lfp])
     parser.option_groups = [opts.common, opts.wavelet]
     (options, files) = parser.parse_args()
 else:
@@ -38,17 +33,13 @@ else:
     options = O()
     options.wavelet_family = None
     options.wavelet_decomposition = 'dwt'
-    options.zscore = False
+    options.zscore = True # XXX ?
     options.do_lfp = False
-    options.do_sweep = False
 
-verbose.level = 4
 
 datapath = os.path.join(cfg.get('paths', 'data root', default='../data'),
                         'cell.luczak/')
 verbose(1, 'Datapath is %s' % datapath)
-
-# Code our poor labels
 
 def loadData():
     # Both lfp and spike counts share the same labels which are
@@ -73,19 +64,13 @@ def loadData():
         [('%dkHz' % (tones[i]), i+38) for i in xrange(43-38)] +
         [('song%d' % (i+1), i+43) for i in xrange(48-43)])
 
-
-    coarsenChunks(d, nchunks=8)         # lets split into 4 chunks
+    coarsenChunks(d, nchunks=8)         # lets split into 8 chunks
 
     return d
 
 
 def preprocess(ds):
-    # TODO we need to make EEPBin available from the EEPDataset
-    # DONE some basic assignment of attributes to dsattr
-
-    # XXX: many things look ugly... we need cleaner interface at few
-    # places I guess
-
+    # If we were provided wavelet family to use
     if options.wavelet_family not in ['-1', None]:
         verbose(2, "Converting into wavelets family %s."
                 % options.wavelet_family)
@@ -99,16 +84,13 @@ def preprocess(ds):
             WT = WaveletPacketMapper(**kwargs)
         ds_orig = ds
         ebdata_wt = WT(ebdata)
-        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
+        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels,
+                           chunks=ds_orig.chunks)
         # copy labels mapping as well
         ds.labels_map = ds_orig.labels_map
 
     if options.zscore:
         verbose(2, "Z-scoring full dataset")
-        # every sample here is independent and we chunked only to
-        # reduce the computation time.  there is close to none effect
-        # for ANOVA from removing just 1 sample out if we did LOO, so,
-        # lets z-score full dataset entirely
         zscore(ds, perchunk=False)
 
     nf_orig = ds.nfeatures
@@ -119,128 +101,22 @@ def preprocess(ds):
     return ds
 
 
-def clfSweep(ds):
-    """Simple sweep over various classifiers with basic feature
-    selections to assess performance
-    """
-
-    verbose(1, "Sweeping through classifiers with NFold splitter for generalization")
-
-    dsc = ds
-    best_ACC = 0
-    best_MCC = -1
-    for clf_ in clfs['multiclass']:
-      for clf in [ FeatureSelectionClassifier(
-                    clf_,
-                    SensitivityBasedFeatureSelection(
-                      OneWayAnova(),
-                      FractionTailSelector(0.010, mode='select', tail='upper')),
-                    descr="%s on 1%%(ANOVA)" % clf_.descr),
-                   FeatureSelectionClassifier(
-                    clf_,
-                    SensitivityBasedFeatureSelection(
-                      OneWayAnova(),
-                      FractionTailSelector(0.05, mode='select', tail='upper')),
-                    descr="%s on 5%%(ANOVA)" % clf_.descr),
-                   clf_
-                 ]:
-        cv = CrossValidatedTransferError(
-            TransferError(clf),
-            NFoldSplitter(),
-            enable_states=['confusion', 'training_confusion'])
-        verbose(2, "Classifier " + clf.descr, lf=False)
-        error = cv(dsc)
-        tstats = cv.training_confusion.stats
-        stats = cv.confusion.stats
-
-        mMCC = N.mean(stats['MCC'])
-        if stats['ACC'] > best_ACC:
-            best_ACC = stats['ACC']
-            best_ACC_cm = cv.confusion
-        if mMCC > best_MCC:
-            best_MCC = mMCC
-            best_MCC_cm = cv.confusion
-
-        verbose(2, " Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (tstats['ACC'], N.mean(tstats['MCC']), stats['ACC'], mMCC))
-
-        if verbose.level > 3:
-            print str(cv.confusion)
-
-    verbose(1, "Best results were ACC=%.2g MCC=%.2g" % (best_ACC, best_MCC))
-    verbose(2, "Confusion matrix for best result according to ACC:\n%s" % best_ACC_cm)
-    verbose(2, "Confusion matrix for best result according to MCC:\n%s" % best_MCC_cm)
-
-
 def analysis(ds):
-    """Simple sweep over various classifiers with basic feature
-    selections to assess performance
+    verbose(1, "Running generic pipeline")
+    senses = doSensitivityAnalysis(
+        ds, {'SMLR': SMLR(descr='SMLR(defaults)')}, {}, NFoldSplitter(),
+        sa_args=', combiner=None')
+    return senses[0][2], N.array(senses[0][1])
+
+
+def limshow(data, ax=None, cmap=P.cm.jet, *args, **kwargs):
+    """Helper: labeled imshow (to add literal labels as  given in ds)
     """
-
-    verbose(1, "Running favorite classifier with NFold splitter for generalization testing")
-
-    dsc = ds
-    best_ACC = 0
-    best_MCC = -1
-
-    clf = SMLR(descr='SMLR(defaults)')
-
-    cv = CrossValidatedTransferError(
-        TransferError(clf),
-        NFoldSplitter(),
-        harvest_attribs=\
-          ['transerror.clf.getSensitivityAnalyzer(force_training=False, transformer=None, combiner=None)()'],
-        enable_states=['confusion', 'training_confusion'])
-    verbose(2, "Classifier " + clf.descr, lf=False)
-    error = cv(dsc)
-    tstats = cv.training_confusion.stats
-    stats = cv.confusion.stats
-    senses = N.array(cv.harvested.values()[0])
-
-    verbose(2, " Training finished. Training: ACC=%.2g MCC=%.2g, Testing: ACC=%.2g MCC=%.2g" %
-                (tstats['ACC'], tstats['mean(MCC)'], stats['ACC'], stats['mean(MCC)']))
-
-    return senses
-
-
-def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
-    """
-    Tried to make use of alpha to make low values invisible. Can plot,
-    but couldn't find a way for colorbar to also change it accordingly
-    (not alpha for the whole colorrange). Proper way seems to be to
-    define custom child of LinearSegmentedColormap which on __call__
-    would tune up returned alpha accordingly.
-
-    may be relevant example is on
-    http://www.nabble.com/Re:-Trying-p8831162.html
-
-    So for now just plot as is
-    """
-    method = 'reg'
-
-    # we don't need class ticks here
-    #ax.yaxis.set_major_formatter(P.NullFormatter())
-
-    #ax.yaxis.set_major_locator(P.NullLocator())
-    if method == 'cmap':
-        dumb = cmap(0)                  # force computation of _lut
-        # adjust lut to incorporate alpha
-        n = cmap._lut.shape[0]-3
-        cmap._lut[:n, 3] = 1-(1-N.linspace(0, 1, n, True))**alpha_power
-        ret = ax.imshow(data, cmap=cmap, *args, **kwargs)
-        # doesn't work since it resets cmap._lut
-    elif method == 'alpha_data':
-        #data_rgba = mpl.image.AxesImage(ax).to_rgba(data)
-        data_rgba = cmap(data)
-        # scale alpha by value
-        data_rgba[:, :, 3] = 1-(1-data/N.max(data))**alpha_power
-        ret = ax.imshow(data_rgba, cmap=cmap, *args, **kwargs)
-    else:
-        ret = ax.imshow(data, cmap=cmap, *args, **kwargs)
+    ret = ax.imshow(data, cmap=cmap, *args, **kwargs)
 
     P.yticks(())
     dx = ax.axis()[1]/80
-
+    # plot literal labels
     labels_map_rev = dict([reversed(x) for x in ds.labels_map.iteritems()])
     for i,l in enumerate(ds.UL):
         ax.text(-dx, (len(ds.UL)-i)-0.5, labels_map_rev[l],
@@ -251,8 +127,8 @@ def imshow_alphad(data, ax=None, cmap=P.cm.jet, alpha_power=4, *args, **kwargs):
 
 
 def finalFigure(senses):
-    # pre-process sensitivities slightly
-    # which we should have actually done in transformers
+    # Create  a custom colormap
+    RdBu_rev = inverseCmap('RdBu')
 
     # 1. norm each sensitivity per split/class
     snormed = senses / N.sqrt(N.sum(senses*senses, axis=1))[:, N.newaxis, :]
@@ -263,99 +139,61 @@ def finalFigure(senses):
     sensO = ds.mapReverse(smeaned.T)
     sensOn = L2Normed(sensO)
 
-    # Sum of sensitivities across time bins -- so per each neuron/class
-    sensOn_perneuron1 = N.sum(N.abs(sensOn), axis=1)
-    #sensOn_perneuron1 = N.sum(sensOn, axis=1)
+    # Sum of sensitivities across time bins -- so per each unit/class
+    sensOn_perunit1 = N.sum(N.abs(sensOn), axis=1)
 
-    nsx = 2
-    nsy = 2
+    nsx,nsy = 2,2
     fig = P.figure(figsize=(8*nsx, 4*nsy))
-    c_n_aspect = 6.0                           # aspect ratio for class x neurons
+    c_n_aspect = 6.0                           # aspect ratio for class x units
     c_tb_aspect = 401/105.0*c_n_aspect         # aspect ratio for class x time
 
-    dsO = ds.O
-
-    ckwargs = {'interpolation': 'nearest',
-               'origin': 'upper'}
+    ckwargs = {'interpolation': 'nearest', 'origin': 'upper'}
     # Lets plot mean counts per each class
     ax = fig.add_subplot(nsy, nsx, 1);
-    if True:
-        # if plotting with imshow
-        mcounts = []
-        mvar = []
-        for l in ds.UL:
-            dsl = dsO[ds.labels == l, :, :]
-            mcounts += [P.mean(P.sum(dsl, axis=2), axis=0)]
-            mvar += [N.mean(N.var(dsl, axis=1), axis=0)]
-        mcounts = N.array(mcounts)
-        mvar = N.array(mvar)
 
-        im,cb = imshow_alphad(mcounts, ax=ax, cmap = P.cm.YlOrRd, #P.cm.OrRd,
-                              aspect=c_tb_aspect, vmin=0, **ckwargs)
-        ax.set_yticklabels( ( ) )
-        P.xlabel('Time(ms)')
-        #P.ylabel('Class')
-        P.title('Mean spike counts')
+    mcounts, mvar = [], []
+    # map data into original space
+    dsO = ds.O
+    for l in ds.UL:
+        dsl = dsO[ds.labels == l, :, :]
+        mcounts += [P.mean(P.sum(dsl, axis=2), axis=0)]
+        mvar += [N.mean(N.var(dsl, axis=1), axis=0)]
+    mcounts = N.array(mcounts)
+    mvar = N.array(mvar)
 
-
-    if False:
-        ax = fig.add_subplot(nsy, nsx, fi); fi += 1
-
-        # plot using plotERPs
-        plots = []
-        # tones will go in the redish, songs in greenish
-        colors = {38: '#550000', 39: '#770000', 40: '#AA0000',
-                  41: '#CC0000', 42: '#FF0000',
-                  43: '#005500', 44: '#339900', 45: '#00BB33',
-                  46: '#33dd00', 47: '#007755'}
-        for l in [38, 47]:#ds.UL:
-            plots += [{'data':P.sum(dsO[ds.labels == l, :, :], axis=2),
-                       'color':colors[l],
-                       'label':ds.labels_map[l]}]
-
-        #colors=('b', 'g', 'r', 'c', 'm', 'y', 'k', 'w')
-        # error type to use in all plots
-        errtype=['std', 'ci95']
-        # TODO: if no post is provided... plotERP fails
-        plotERPs( plots, pre=0, pre_mean=0, SR=1, ax=ax, errtype=errtype,
-                  ylformat='%.2f', ylabel='Spike count', xlabel='Time', post=dsO.shape[1],
-                  legend=True)
-        P.axis('off')
-        #cb = P.colorbar(drawedges=False, alpha=0.0, ticks=False)
-        #P.axis((0.0, 400.0, -1.0, 5.0)) # to size it to match previos one
-        #ax.set_aspect(c_tb_aspect*10.0/6)
-        #P.draw()
+    im,cb = limshow(mcounts, ax=ax, cmap = P.cm.YlOrRd,
+                          aspect=c_tb_aspect, vmin=0, **ckwargs)
+    ax.set_yticklabels( ( ) )
+    P.xlabel('time (ms)')
+    P.title('Mean spike counts')
 
     ax = fig.add_subplot(nsy, nsx, 4);
-    # TODO: proper labels on y-axis
-    vmax = N.max(N.abs(sensOn_perneuron1))
-    imshow_alphad(sensOn_perneuron1, ax=ax, cmap=RdBu_rev, #cmap = P.cm.YlOrRd,
-                  aspect=c_n_aspect, vmin=-vmax, vmax=vmax, **ckwargs);
-    P.xlabel('Neuron')
-    P.title('Aggregate neurons sensitivities')
 
-    ax = fig.add_subplot(nsy, nsx, 2);
-    # Var per class/neuron
-    im,cb = imshow_alphad(mvar, ax=ax, cmap = P.cm.YlOrRd, #P.cm.OrRd,
-                          aspect=c_n_aspect, vmin=0, **ckwargs)
-    P.xlabel('Neuron')
+    vmax = N.max(N.abs(sensOn_perunit1))
+    limshow(sensOn_perunit1, ax=ax, cmap=RdBu_rev,
+                  aspect=c_n_aspect, vmin=-vmax, vmax=vmax, **ckwargs);
+    P.xlabel('Unit')
+    P.title('Aggregate units sensitivities')
+
+    ax = fig.add_subplot(nsy, nsx, 2)
+    # Var per class/unit
+    im,cb = limshow(mvar, ax=ax, cmap = P.cm.YlOrRd,
+                    aspect=c_n_aspect, vmin=0, **ckwargs)
+    P.xlabel('Unit')
     P.title('Mean variance')
 
     ax = fig.add_subplot(nsy, nsx, 3);
-    sensOn_perneuron = N.sum(sensOn_perneuron1, axis=0)
-    strongest_neuron = N.argsort(sensOn_perneuron)[-1]
+    sensOn_perunit = N.sum(sensOn_perunit1, axis=0)
+    strongest_unit = N.argsort(sensOn_perunit)[-1]
 
     # Lets plot sensitivities in time bins per each class for the 'strongest'
-    sens_neuron = sensOn[:, :, strongest_neuron]
-    mmax = N.max(N.abs(sens_neuron))
-    im, cb = imshow_alphad(sens_neuron, ax=ax, cmap=RdBu_rev,
-                  aspect=c_tb_aspect, vmin=-mmax, vmax=mmax, **ckwargs)
-    P.xlabel('Time(ms)')
-    P.title('Neuron #%d sensitivities' % strongest_neuron)
+    sens_unit = sensOn[:, :, strongest_unit]
+    mmax = N.max(N.abs(sens_unit))
+    im, cb = limshow(sens_unit, ax=ax, cmap=RdBu_rev,
+                     aspect=c_tb_aspect, vmin=-mmax, vmax=mmax, **ckwargs)
+    P.xlabel('time (ms)')
+    P.title('Unit #%d sensitivities' % strongest_unit)
 
-    # widen things up a bit
-    #fig.subplots_adjust(hspace=0.2, wspace=0.2,
-    #                    left=0.05, right=0.95, top=0.95, bottom=0.5)
     return fig
 
 
@@ -363,12 +201,13 @@ if __name__ == '__main__':
     ds = loadData()
     verbose(1, "Dataset for processing summary:\n%s" % ds.summary())
     ds = preprocess(ds)
-    if options.do_sweep:
-        # To check what we can possibly get with different classifiers
-        clfSweep(ds)
-    else:
-        senses = analysis(ds)
-        finalFigure(senses)
-        pass
+    confusion, senses = analysis(ds)
+    P.figure()
+    fig, im, cb = confusion.plot(
+        labels=("3kHz","7kHz","12kHz","20kHz","30kHz", None,
+                "song1","song2","song3","song4","song5"))
+    fig.savefig('figs/cell_luczak-confusion.svg')
+    fig = finalFigure(senses)
+    fig.savefig('figs/cell_luczak-sens.svg')
 
 

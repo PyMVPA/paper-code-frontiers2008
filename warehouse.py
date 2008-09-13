@@ -9,6 +9,13 @@
 
 __docformat__ = 'restructuredtext'
 
+# Instruct matplotlib to use sans-serif fonts. DejaVu Sans is our
+# choice.  To get an effect - warehouse needs to be imported prior
+# pylab, thus prior mvpa.suite.
+#
+from matplotlib import rc as rcmpl
+rcmpl('font',**{'family':'sans-serif','sans-serif':['DejaVu Sans']})
+
 # import the full PyMVPA suite
 from mvpa.suite import *
 
@@ -19,7 +26,7 @@ import cPickle
 verbose.level = 100
 
 
-def doSensitivityAnalysis(ds, clfs, sensanas, splitter):
+def doSensitivityAnalysis(ds, clfs, sensanas, splitter, sa_args=""):
     """Generic function to perform sensitivity analysis (along classification)
 
     :Parameters:
@@ -31,8 +38,10 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter):
         Additional measures to be computed
       splitter : Splitter
         Splitter to be used for cross-validation
+      sa_args : basestring
+        Additional optional arguments to provide to getSensitivityAnalyzer
     """
-    # absorb all sensitivities
+    # to absorb all sensitivities
     senses = []
 
     # run classifiers in cross-validation
@@ -43,13 +52,8 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter):
             splitter,
             harvest_attribs=\
               ['transerror.clf.getSensitivityAnalyzer(force_training=False,' \
-               'transformer=None)()'],
+               'transformer=None%s)()' % (sa_args)],
             enable_states=['confusion', 'training_confusion'])
-        # XXX we might need to device some 'CommonSide' transformer so all
-        # sensitivities point to the 'approx' the same side. Now we have them
-        # flipped -- SVM vs GPR/SMLR
-        # MH: Added crude 'fix' to plotting, as we now where they should point
-        #     too
 
         verbose(1, 'Doing cross-validation with ' + label)
         # run cross-validation
@@ -62,7 +66,7 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter):
         # and store
         senses.append(
             (label + ' (%.1f%% corr.) weights' % cv.confusion.stats['ACC%'],
-             sensitivities))
+             sensitivities, cv.confusion, cv.training_confusion))
 
     verbose(1, 'Computing additional sensitvities')
 
@@ -75,6 +79,6 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter):
         # compute sensitivities
         sa(ds)
         # and grab them for all splits
-        senses.append((k, sa.maps))
+        senses.append((k, sa.maps, None, None))
 
     return senses
