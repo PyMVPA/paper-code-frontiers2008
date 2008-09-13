@@ -124,7 +124,7 @@ def preprocess(ds):
 
 
 def analysis(ds):
-    # Lets replicate published obtained resuls.  We can do slightly
+    # Lets replicate published obtained results.  We can do slightly
     # better using RFEs and initial feature selection, but lets just
     # replicate for the purpose of the paper
     clf = sg.SVM(kernel_type='linear')
@@ -166,8 +166,7 @@ def analysis(ds):
     cv2B = CrossValidatedTransferError(
               TransferError(clf),
               NFoldSplitter(nperlabel='equal',
-                            # increase to reasonable number
-                            nrunspersplit=4),
+                            nrunspersplit=20),
               enable_states=['confusion', 'training_confusion'])
 
     error2B = cv2B(ds)
