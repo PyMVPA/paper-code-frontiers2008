@@ -37,6 +37,9 @@ mode = 'color' # object, delayed
 # set target sampling rate for preprocessing
 target_samplingrate = 200.0
 
+# colors to be used in the plots
+colors = ['red', 'green', 'blue', 'cyan', 'magenta']
+
 
 def labels2binlabels(ds, mode):
     """Recode labels of a dataset (inplace) to a certain binary problem.
@@ -143,7 +146,6 @@ def finalFigure(ds_pristine, ds, senses, channel):
 
     sens_labels = []
     erp_cfgs = []
-    colors = ['red', 'green', 'blue', 'cyan', 'magenta']
 
     # for all available sensitivities
     for i, sens_ in enumerate(senses[::-1]):
