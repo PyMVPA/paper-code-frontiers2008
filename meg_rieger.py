@@ -144,6 +144,7 @@ def preprocess(ds):
       Preprocessed Dataset
     """
     if options.wavelet_family is not None:
+        #snippet_start wavelet
         verbose(2, "Converting into wavelets family %s."
                 % options.wavelet_family)
         ebdata = ds.mapper.reverse(ds.samples)
@@ -155,9 +156,13 @@ def preprocess(ds):
             verbose(3, "Doing DWP")
             WT = WaveletPacketMapper(**kwargs)
         ds_orig = ds
+        # Perform choosen wavelet decomposition
         ebdata_wt = WT(ebdata)
-        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels, chunks=ds_orig.chunks)
+        ds = MaskedDataset(samples=ebdata_wt,
+                           labels=ds_orig.labels, chunks=ds_orig.chunks)
+        # copy labels_map
         ds.labels_map = ds_orig.labels_map
+        #snippet_end wavelet
 
     # normalize
     zscore(ds, perchunk=False)

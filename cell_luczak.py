@@ -103,7 +103,7 @@ def preprocess(ds):
     if options.wavelet_family not in ['-1', None]:
         verbose(2, "Converting into wavelets family %s."
                 % options.wavelet_family)
-        ebdata = ds.mapper.reverse(ds.samples)
+        # common arguments for wavelet mappers
         kwargs = {'dim': 1, 'wavelet': options.wavelet_family}
         if options.wavelet_decomposition == 'dwt':
             verbose(3, "Doing DWT")
@@ -111,13 +111,15 @@ def preprocess(ds):
         else:
             verbose(3, "Doing DWP")
             WT = WaveletPacketMapper(**kwargs)
+
         ds_orig = ds
-        ebdata_wt = WT(ebdata)
-        ds = MaskedDataset(samples=ebdata_wt, labels=ds_orig.labels,
-                           chunks=ds_orig.chunks)
+        # Create new dataset with transformed data
+        ds = MaskedDataset(samples=WT(ds.O),
+                           labels=ds_orig.labels, chunks=ds_orig.chunks)
         # copy labels mapping as well
         ds.labels_map = ds_orig.labels_map
 
+    #snippet_start prep
     if options.zscore:
         verbose(2, "Z-scoring full dataset")
         zscore(ds, perchunk=False)
@@ -127,6 +129,7 @@ def preprocess(ds):
     ds = removeInvariantFeatures(ds)
     verbose(2, "Removed invariant features. Got %d out of %d features"
             % (ds.nfeatures, nf_orig))
+    #snippet_end prep
 
     return ds
 

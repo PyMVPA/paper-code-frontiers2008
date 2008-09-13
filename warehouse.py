@@ -26,6 +26,7 @@ import cPickle
 verbose.level = 100
 
 
+#snippet_start doSensitivityAnalysis
 def doSensitivityAnalysis(ds, clfs, sensanas, splitter, sa_args=""):
     """Generic function to perform sensitivity analysis (along classification)
 
@@ -82,3 +83,5 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter, sa_args=""):
         senses.append((k, sa.maps, None, None))
 
     return senses
+#snippet_end doSensitivityAnalysis
+

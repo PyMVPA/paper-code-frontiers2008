@@ -87,13 +87,15 @@ def loadData(subj):
     verbose(1, 'Limit to binary problem: ' + mode)
     labels2binlabels(d, mode)
 
+    #snippet_start resample
     # inplace resampling
     d.resample(sr=target_samplingrate)
     verbose(2, 'Downsampled data to %.1f Hz' % d.samplingrate)
+    #snippet_end resample
 
     return d
 
-
+#snippet_start figures
 def finalFigure(ds_pristine, ds, senses, channel):
     """Generate final ERP, sensitivity and topography plots
 
@@ -237,6 +239,7 @@ def topoFigure(ds, senses):
     P.show()
 
     return fig
+#snippet_end figures
 
 
 if __name__ == '__main__':
