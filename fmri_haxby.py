@@ -131,7 +131,7 @@ def plotAtlasROISampleDistanceDendrogram(ds, sens, atlas_id, atlas_map,
     :Parameters:
       ds: Dataset
         The dataset providing the samples for this cluster analysis.
-      senses: 2-tuple (sensitiv. ID, sensitvities (nfolds x nfeatures)
+      sens: 2-tuple (sensitiv. ID, sensitvities (nfolds x nfeatures))
         The sensitvities used to select a subset of voxels in the ROI
       atlas_id: int
         ROI code of the selected ROI
@@ -366,7 +366,8 @@ if __name__ == '__main__':
     sens_scores = {}
 
     # for all available sensitivities
-    for sid, sens in senses:
+    for sens_ in senses:
+        sid, sens = sens_[:2]
         # convert into NumPy array for easier handling
         sens = N.array(sens)
 
