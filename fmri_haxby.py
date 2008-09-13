@@ -282,7 +282,7 @@ def plotROISensitivityScores(sens_scores, nmin_rois, nmax_rois, ranks):
 
     return fig
 
-
+#snippet_start loadData
 def loadData(subj):
     """Load data for one subject and return dataset.
 
@@ -325,7 +325,7 @@ def loadData(subj):
 
     # done
     return dataset
-
+#snippet_end loadData
 
 
 if __name__ == '__main__':
