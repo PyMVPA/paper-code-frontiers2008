@@ -47,29 +47,24 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter, sa_args=""):
 
     # run classifiers in cross-validation
     for label, clf in clfs.iteritems():
-        cv = \
-          CrossValidatedTransferError(
-            TransferError(clf),
-            splitter,
-            harvest_attribs=\
-              ['transerror.clf.getSensitivityAnalyzer(force_training=False,' \
-               'transformer=None%s)()' % (sa_args)],
+        sclf = SplitClassifier(clf, splitter,
             enable_states=['confusion', 'training_confusion'])
 
         verbose(1, 'Doing cross-validation with ' + label)
-        # run cross-validation
-        merror = cv(ds)
-        verbose(1, 'Accumulated confusion matrix for out-of-sample tests:\n' +
-                str(cv.confusion))
+        # Compute sensitivity, which in turn trains the sclf
+        sensitivities = sclf.getSensitivityAnalyzer(
+            # do not combine sensitivities across splits, nor across classes
+            combiner=None, slave_combiner=None)(ds)
 
-        # get harvested sensitivities for all splits
-        sensitivities = N.array(cv.harvested.values()[0])
+        verbose(1, 'Accumulated confusion matrix for out-of-sample tests:\n' +
+                str(sclf.confusion))
+
         # and store
         senses.append(
-            (label + ' (%.1f%% corr.) weights' % cv.confusion.stats['ACC%'],
-             sensitivities, cv.confusion, cv.training_confusion))
+            (label + ' (%.1f%% corr.) weights' % sclf.confusion.stats['ACC%'],
+             sensitivities, sclf.confusion, sclf.training_confusion))
 
-    verbose(1, 'Computing additional sensitvities')
+    verbose(1, 'Computing additional sensitivities')
 
     # wrap everything into SplitFeaturewiseMeasure
     # to get sense of variance across our artificial splits
