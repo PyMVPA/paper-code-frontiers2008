@@ -210,7 +210,7 @@ def finalFigure(senses):
     mcounts = N.array(mcounts)
     mvar = N.array(mvar)
 
-    im,cb = limshow(mcounts, ax=ax, cmap = P.cm.YlOrRd,
+    im,cb = limshow(mcounts, ax=ax, cmap=P.cm.YlOrRd,
                           aspect=c_tb_aspect, vmin=0, **ckwargs)
     ax.set_yticklabels( ( ) )
     P.xlabel('time (ms)')
@@ -226,7 +226,7 @@ def finalFigure(senses):
 
     ax = fig.add_subplot(nsy, nsx, 2)
     # Var per class/unit
-    im,cb = limshow(mvar, ax=ax, cmap = P.cm.YlOrRd,
+    im,cb = limshow(mvar, ax=ax, cmap=P.cm.YlOrRd,
                     aspect=c_n_aspect, vmin=0, **ckwargs)
     P.xlabel('Unit')
     P.title('Mean variance')
