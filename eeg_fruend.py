@@ -217,7 +217,8 @@ def topoFigure(ds, senses):
         scores = L2Normed(scores)
 
         # plot all EEG sensor scores
-        plotHeadTopography(scores, sensors.locations(),
+        plotHeadTopography(scores[[ds.channelids.index(s) for s in sensors.names]],
+                           sensors.locations(),
                            plotsensors=True, resolution=50,
                            interpolation='nearest')
         # ensure uniform scaling
