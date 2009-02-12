@@ -165,11 +165,6 @@ def finalFigure(ds_pristine, ds, senses, channel):
         # take one channel: yields (nfolds x ntimepoints)
         ch_sens = backproj[:, ch_of_interest, :]
 
-        # sign of sensitivities is up to classifier relabling of the
-        # input classes.
-        if ch_sens.mean() < 0:
-            ch_sens *= -1
-
         # charge ERP definition
         erp_cfgs.append({'label': sens_id, 'color': colors[i], 'data': ch_sens})
 
@@ -196,7 +191,7 @@ def topoFigure(ds, senses):
     fig = P.figure(facecolor='white', figsize=((nsens+1)*3, 4))
 
     # again for all available sensitvities
-    for i, sens_ in enumerate(senses):
+    for i, sens_ in enumerate(senses[::-1]):
         (sens_id, sens) = sens_[:2]
         ax = fig.add_subplot(1, nsens+1, i+1, frame_on=False)
         # back-project: yields (nfolds x nchannels x ntimepoints)
@@ -237,11 +232,110 @@ def topoFigure(ds, senses):
     ax.axison = False
     # Expand things a bit
     fig.subplots_adjust(left=0.06, right=1.05, bottom=0.01, wspace=-0.2)
-    P.show()
 
     return fig
 #snippet_end figures
 
+
+def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
+    """Plot topographies of given sensitivities at specified timepoints
+
+    :Parameters:
+      timepoints : list of string or float
+        Defines time points (in seconds) around which time points
+        to plot sensitivities
+      dt : float
+        Duration (in seconds) to take for averaging the sensitivity
+
+    XXX: This function shares a lot of code with topoFigure, refactor
+    """
+
+    # how many sensitivities do we have
+    nsens = len(senses)
+
+    ntimepoints = len(timepoints)
+
+    # new figure for topographies
+    fig = P.figure(facecolor='white', figsize=((ntimepoints+1)*3, nsens*4))
+
+    # again for all available sensitivities
+    for i, sens_ in enumerate(senses[::-1]):
+        for it, timepoint in enumerate(timepoints):
+            (sens_id, sens) = sens_[:2]
+            ax = fig.add_subplot(nsens, ntimepoints+1, i*(ntimepoints+1) + it + 1,
+                                 frame_on=False)
+            # back-project: yields (nfolds x nchannels x ntimepoints)
+            backproj = ds.mapReverse(sens)
+            # go with abs(), as negative sensitivities are as important
+            # as positive ones...
+            # we can do that only after we avg across splits
+            avgbackproj = backproj.mean(axis=0)
+
+            if timepoint == 'TotalAbs':
+                # compute per channel scores and average across folds
+                # (yields (nchannels, )
+                scores = N.sum(Absolute(avgbackproj), axis=1)
+            elif timepoint == 'Total':
+                # compute per channel scores and average across folds
+                # (yields (nchannels, )
+                scores = N.sum(avgbackproj, axis=1)
+            elif N.isreal(timepoint):
+                timesample = N.round((timepoint - ds.t0) / ds.dt)
+                dsample = dt / ds.dt
+                scores = N.sum(avgbackproj[:, timesample-dsample:timesample+dsample],
+                               axis=1)
+            else:
+                raise ValueError, "Don't know how to treat timepoint '%s'" % timepoint
+
+            # strip EOG scores (which are zero anyway,
+            # as they had been stripped of before cross-validation)
+            scores = scores[:-3]
+
+            # and normalize so that all scores squared sum up to 1
+            scores = L2Normed(scores)
+
+            # plot all EEG sensor scores
+            plotHeadTopography(
+                scores[[ds.channelids.index(s) for s in sensors.names]],
+                sensors.locations(),
+                plotsensors=True, resolution=50,
+                interpolation='nearest')
+            # ensure uniform scaling
+            P.clim(vmin=-0.4, vmax=0.4)
+
+            if it == 0:
+                # Mention sensitivity in the 0th column
+                P.text(-1.8, 0, re.sub(' .*', '', sens_id),
+                       horizontalalignment='center',
+                       verticalalignment='center',
+                       rotation='vertical',
+                       size='larger',
+                       )
+
+                axis = P.axis()                 # to preserve original size
+                # Draw a color 'bar' for the given sensitivity
+                ax.bar(-1.6, 0.8, 0.15, -0.4, color=colors[i], edgecolor=colors[i]);
+                P.axis(axis)
+
+            if i == 0:
+                if isinstance(timepoint, basestring):
+                    s = timepoint
+                else:
+                    s = '%3g ms' % (timepoint * 1000)
+                # We need to mention time point
+                P.title(s)
+
+
+    ax = fig.add_subplot(1, nsens+1, nsens+1, frame_on=False)
+    cb = P.colorbar(shrink=0.95, fraction=0.05, drawedges=False,
+                    pad=0.9,
+                    ticks=[-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4])
+
+    ax.axison = False
+    # Expand things a bit
+    fig.subplots_adjust(left=0.06, top=1.0,
+                        right=1.05, bottom=0.01, wspace=-0.2, hspace=-0.3)
+    return fig
 
 if __name__ == '__main__':
     # load dataset for some subject
@@ -267,7 +361,7 @@ if __name__ == '__main__':
     zscore(ds, perchunk=True)
     print ds.summary()
 
-    do_analyses = True
+    do_analyses = False
     if do_analyses == True:
         # some classifiers to test
         clfs = {
@@ -295,11 +389,35 @@ if __name__ == '__main__':
         senses = cPickle.load(picklefile)
         picklefile.close()
 
+    # sign of sensitivities is up to classifier relabling of the
+    # input classes.
+    for sens in senses:
+        # taking Pz electrode and 150ms time point -- must be positive
+        if ds.mapReverse(sens[1])[0, 23, 70] < 0:
+            s = sens[1]                 # trick the tuple
+            s *= -1.0
+
     # (re)get pristine dataset for plotting of ERPs
     ds_pristine=loadData(subj)
+
+    P.ioff()
 
     # plot figure for channel of choice
     fig_sens = finalFigure(ds_pristine, ds, senses, 'Pz')
 
     # plot figure for topographies
     fig_topo = topoFigure(ds, senses)
+
+    fig_topos = topoFigures(ds, senses,
+                        ['Total', 0.150, 0.2, 0.25, 0.37],
+                        0.025,
+                        )
+    P.ion()
+
+    do_savefig = True
+    if do_savefig:
+        for f in ['fig_sens', 'fig_topo', 'fig_topos']:
+            verbose(3, "Storing figure %s" % f)
+            locals()[f].savefig(os.path.join('results', '%s.svg' % f))
+    else:
+        P.show()
