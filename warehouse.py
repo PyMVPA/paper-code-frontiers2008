@@ -80,3 +80,17 @@ def doSensitivityAnalysis(ds, clfs, sensanas, splitter, sa_args=""):
     return senses
 #snippet_end doSensitivityAnalysis
 
+
+def Pioff():
+    """Turn off pylab redrawing
+    """
+    # should compare by backend?
+    if P.matplotlib.get_backend() == 'TkAgg':
+        P.ioff()
+
+def Pion():
+    """Turn on pylab redrawing
+    """
+    if P.matplotlib.get_backend() == 'TkAgg':
+        P.draw()
+        P.ion()
