@@ -59,7 +59,7 @@ def labels2binlabels(ds, mode):
     ds.labels[:]=N.array([i in filt for i in ds.labels], dtype='int')
 
 
-def loadData(subj):
+def loadData(subj, sr=None):
     """Load data for one subject and return dataset.
 
     :Parameter:
@@ -89,7 +89,8 @@ def loadData(subj):
 
     #snippet_start resample
     # inplace resampling
-    d.resample(sr=target_samplingrate)
+    if sr is not None:
+        d.resample(sr=sr)
     verbose(2, 'Downsampled data to %.1f Hz' % d.samplingrate)
     #snippet_end resample
 
@@ -228,7 +229,7 @@ def topoFigure(ds, senses):
 
     ax = fig.add_subplot(1, nsens+1, nsens+1, frame_on=False)
     cb = P.colorbar(shrink=0.95, fraction=0.05, drawedges=False,
-                    ticks=[0, 0.1, 0.2, 0.3, 0.4])
+                    ticks=[0, 0.2, 0.4])
     ax.axison = False
     # Expand things a bit
     fig.subplots_adjust(left=0.06, right=1.05, bottom=0.01, wspace=-0.2)
@@ -237,7 +238,8 @@ def topoFigure(ds, senses):
 #snippet_end figures
 
 
-def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
+def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1,
+                globaly_normed=False):
     """Plot topographies of given sensitivities at specified timepoints
 
     :Parameters:
@@ -246,6 +248,9 @@ def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
         to plot sensitivities
       dt : float
         Duration (in seconds) to take for averaging the sensitivity
+      globaly_normed : bool
+        Either to norm sensitivities through all time points or just
+        for a given time point separately
 
     XXX: This function shares a lot of code with topoFigure, refactor
     """
@@ -271,28 +276,42 @@ def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
             # we can do that only after we avg across splits
             avgbackproj = backproj.mean(axis=0)
 
+            if globaly_normed:
+                # strip EOG scores (which are zero anyway,
+                # as they had been stripped of before cross-validation)
+                avgbackproj = avgbackproj[:-3]
+
+                # and normalize so that all scores squared sum up to 1
+                avgbackproj = L2Normed(avgbackproj)
+
+                clim = 0.05
+
             if timepoint == 'TotalAbs':
                 # compute per channel scores and average across folds
                 # (yields (nchannels, )
-                scores = N.sum(Absolute(avgbackproj), axis=1)
+                scores = N.mean(Absolute(avgbackproj), axis=1)
             elif timepoint == 'Total':
                 # compute per channel scores and average across folds
                 # (yields (nchannels, )
-                scores = N.sum(avgbackproj, axis=1)
+                scores = N.mean(avgbackproj, axis=1)
             elif N.isreal(timepoint):
                 timesample = N.round((timepoint - ds.t0) / ds.dt)
                 dsample = dt / ds.dt
-                scores = N.sum(avgbackproj[:, timesample-dsample:timesample+dsample],
-                               axis=1)
+                scores = N.mean(avgbackproj[:, timesample-dsample:timesample+dsample],
+                                axis=1)
             else:
                 raise ValueError, "Don't know how to treat timepoint '%s'" % timepoint
 
-            # strip EOG scores (which are zero anyway,
-            # as they had been stripped of before cross-validation)
-            scores = scores[:-3]
 
-            # and normalize so that all scores squared sum up to 1
-            scores = L2Normed(scores)
+            if not globaly_normed:
+                # strip EOG scores (which are zero anyway,
+                # as they had been stripped of before cross-validation)
+                scores = scores[:-3]
+
+                # and normalize so that all scores squared sum up to 1
+                scores = L2Normed(scores)
+
+                clim = 0.4
 
             # plot all EEG sensor scores
             plotHeadTopography(
@@ -301,7 +320,7 @@ def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
                 plotsensors=True, resolution=50,
                 interpolation='nearest')
             # ensure uniform scaling
-            P.clim(vmin=-0.4, vmax=0.4)
+            P.clim(vmin=-clim, vmax=clim)
 
             if it == 0:
                 # Mention sensitivity in the 0th column
@@ -328,8 +347,8 @@ def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
 
     ax = fig.add_subplot(1, nsens+1, nsens+1, frame_on=False)
     cb = P.colorbar(shrink=0.95, fraction=0.05, drawedges=False,
-                    pad=0.9,
-                    ticks=[-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4])
+                    pad=0.9, ticks=[-clim, 0, clim])
+
 
     ax.axison = False
     # Expand things a bit
@@ -339,7 +358,7 @@ def topoFigures(ds, senses, timepoints=['all', 'allabs'], dt=1):
 
 if __name__ == '__main__':
     # load dataset for some subject
-    ds=loadData(subj)
+    ds=loadData(subj, sr=target_samplingrate)
 
     # artificially group into chunks
     nchunks = 6
@@ -398,7 +417,7 @@ if __name__ == '__main__':
             s *= -1.0
 
     # (re)get pristine dataset for plotting of ERPs
-    ds_pristine=loadData(subj)
+    ds_pristine=loadData(subj, sr=target_samplingrate)
 
     P.ioff()
 
